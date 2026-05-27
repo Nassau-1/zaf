@@ -99,6 +99,68 @@ function getFormattedDate() {
   return `${year}-${month}-${day}`;
 }
 
+function getRoleProfile(role) {
+  const taxonomyPath = path.join(REPO_ROOT, 'docs', 'agent-taxonomy.md');
+  if (!fs.existsSync(taxonomyPath)) {
+    return `*   **Role**: ${role}\n*   **Taxonomy File**: Missing from docs/agent-taxonomy.md`;
+  }
+  
+  try {
+    const content = fs.readFileSync(taxonomyPath, 'utf8');
+    const normalizedRole = role.toLowerCase().replace(/[^a-z]/g, '');
+    
+    const mappings = [
+      { key: 'coo', search: 'chief operating officer' },
+      { key: 'engineering', search: 'engineering core' },
+      { key: 'testing', search: 'quality & testing' },
+      { key: 'quality', search: 'quality & testing' },
+      { key: 'data', search: 'data & ai specialist' },
+      { key: 'ai', search: 'data & ai specialist' },
+      { key: 'security', search: 'security specialist' },
+      { key: 'sre', search: 'site reliability engineer' }
+    ];
+    
+    let matchedSearch = normalizedRole;
+    for (const map of mappings) {
+      if (normalizedRole.includes(map.key) || map.key.includes(normalizedRole)) {
+        matchedSearch = map.search;
+        break;
+      }
+    }
+    
+    const lines = content.split(/\r?\n/);
+    let startIdx = -1;
+    let headerName = '';
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith('#') && line.toLowerCase().includes(matchedSearch)) {
+        startIdx = i;
+        headerName = line.replace(/^#+\s+/, '');
+        break;
+      }
+    }
+    
+    if (startIdx === -1) {
+      return `*   **Role**: ${role} (profile not found in agent-taxonomy.md)`;
+    }
+    
+    let profileLines = [];
+    for (let j = startIdx + 1; j < lines.length; j++) {
+      const line = lines[j];
+      const trimmed = line.trim();
+      if (trimmed.startsWith('#') || trimmed.startsWith('---')) {
+        break;
+      }
+      profileLines.push(line);
+    }
+    
+    return `### 👤 Role Profile: ${headerName}\n\n${profileLines.join('\n').trim()}`;
+  } catch (err) {
+    return `*   **Role**: ${role}\n*   **Parser Warning**: Failed to parse agent-taxonomy.md dynamically (${err.message})`;
+  }
+}
+
 // ─── Command: Ticket Status ────────────────────────────────────────────────────
 
 function handleTicketStatus(ticketId) {
@@ -323,6 +385,8 @@ function handleRun(role, ticketId, harnessOption) {
 
   // 1. Compile Transient Skill Harness (.zaf-skill.md)
   const transientSkillPath = path.join(REPO_ROOT, '.zaf-skill.md');
+  const roleProfile = getRoleProfile(role);
+  
   const skillBlueprint = `# ZAF HARNESS SYSTEM SKILL
 
 > **Warning to Assistant**: You are executing under the ZO Agentic Framework (ZAF) control plane. You must strictly follow these operational constraints.
@@ -334,7 +398,16 @@ function handleRun(role, ticketId, harnessOption) {
 *   **Ticket Title**: ${data.title || 'N/A'}
 *   **Last Handoff Summary**: ${lastHandoff}
 
-## 2. Operational Constraints
+## 2. Dynamic Agent Persona & Boundaries
+${roleProfile}
+
+## 3. Directory Mounts & Write Authorities
+You are authorized to read and write files ONLY within the following boundaries:
+*   **Repository Root (Writable)**: \`${path.resolve(REPO_ROOT)}\`
+*   **Active Tickets (Append-Only logs/Status)**: \`${ACTIVE_DIR}\`
+*   **System configurations & vault credentials**: Completely Read-only / Unauthorized.
+
+## 4. Operational Constraints
 1.  **Ticket State Modification**:
     *   Do not delete ticket files.
     *   To complete this task, you must rewrite the metadata front-matter status at the top of \`WIP/tickets/ACTIVE/${formattedId}.md\` from \`status: IN_PROGRESS\` (or other status) to \`status: DONE\`.
