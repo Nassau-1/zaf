@@ -401,6 +401,96 @@ function renderOverview(container) {
   const stats = {};
   for (const t of active) stats[t.status] = (stats[t.status] || 0) + 1;
 
+  const statusSummaryHtml = STATUS_ORDER.map(s => {
+    const count = stats[s] || 0;
+    if (count === 0) return '';
+    return `
+      <div class="stat-card" style="cursor:pointer" onclick="applyStatusFilter('${s}')">
+        <div class="stat-number" style="color:${statusColor(s)}">${count}</div>
+        <div class="stat-label">${STATUS_LABELS[s] || s}</div>
+      </div>`;
+  }).join('');
+
+  if (!STATE.selectedRepo && STATE.data && STATE.data.repos) {
+    const repoCards = STATE.data.repos.map(r => {
+      const repoActive = STATE.data.tickets.active.filter(t => t.repoId === r.id);
+      const repoArchived = STATE.data.tickets.archived.filter(t => t.repoId === r.id);
+      const activeCount = repoActive.length;
+      const archivedCount = repoArchived.length;
+      
+      const rStats = {};
+      for (const t of repoActive) rStats[t.status] = (rStats[t.status] || 0) + 1;
+      
+      const statusSegs = STATUS_ORDER.map(s => {
+        const count = rStats[s] || 0;
+        if (count === 0) return '';
+        const pct = ((count / activeCount) * 100).toFixed(1);
+        return `<div class="ws-status-seg" style="width:${pct}%; background:${statusColor(s)}" title="${STATUS_LABELS[s] || s}: ${count}"></div>`;
+      }).join('');
+
+      return `
+        <div class="ws-card fade-in" style="position:relative; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--shadow-card); min-height: 170px; display:flex; flex-direction:column; justify-content:space-between; cursor:pointer; transition: transform var(--t-fast), border var(--t-fast);" onclick="selectRepoAndExplore('${r.id}')">
+          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--indigo-500);border-radius:10px 10px 0 0"></div>
+          <div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+              <span style="font-size:13px; font-weight:700; color:var(--text-primary); font-family:monospace;">${r.id}</span>
+              <span class="tag tag-repo" style="font-size:9px; background: rgba(99,102,241,0.15); color: var(--indigo-400);">${r.label}</span>
+            </div>
+            <div style="font-size:24px; font-weight:800; color:var(--text-primary); margin-bottom:4px; font-family:'JetBrains Mono', monospace;">${activeCount}</div>
+            <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600; margin-bottom:10px;">Active Tickets</div>
+          </div>
+          <div>
+            <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-secondary); margin-bottom:6px;">
+              <span>Archived: <strong>${archivedCount}</strong></span>
+              <span>Total: <strong>${activeCount + archivedCount}</strong></span>
+            </div>
+            ${activeCount > 0 ? `
+              <div class="ws-status-bar" style="height:5px; background:rgba(255,255,255,0.03); border-radius:3px; overflow:hidden; display:flex;">
+                ${statusSegs}
+              </div>
+            ` : `<div style="height:5px; background:rgba(255,255,255,0.01); border-radius:3px;"></div>`}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    container.innerHTML = `
+      <div class="view-programme fade-in" style="padding: 24px; max-width: 1200px;">
+        <div class="section-header" style="margin-bottom:30px; display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <h1 style="font-size:20px; font-weight:800; display:flex; align-items:center; gap:10px; margin:0 0 4px;">
+              <span>🏢</span> Sovereign Multi-Repository Workspaces
+            </h1>
+            <span class="section-meta" style="font-size:12px; color:var(--text-muted);">${active.length} active tickets across ${STATE.data.repos.length} repositories</span>
+          </div>
+        </div>
+
+        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:20px; margin-bottom:32px;">
+          ${repoCards}
+        </div>
+        
+        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px;">
+          <h3 style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin:0 0 16px; display:flex; align-items:center; gap:8px;">
+            <span>📈</span> Cumulative Status Distribution
+          </h3>
+          <div style="display:flex; flex-wrap:wrap; gap:12px;">
+            ${statusSummaryHtml}
+          </div>
+        </div>
+      </div>
+    `;
+    
+    window.selectRepoAndExplore = function(repoId) {
+      STATE.selectedRepo = repoId;
+      const sel = document.getElementById('repo-select');
+      if (sel) sel.value = repoId;
+      updateSidebarStats();
+      updateBadges();
+      renderOverview(container);
+    };
+    return;
+  }
+
   const wsData = {};
   for (const t of active) {
     const ws = t.workstream || 'none';
@@ -450,16 +540,6 @@ function renderOverview(container) {
         <div class="ws-count" style="color:${color}">${info.total}</div>
         <div class="ws-count-label">tickets</div>
         <div class="ws-status-bar">${statusSegs}</div>
-      </div>`;
-  }).join('');
-
-  const statusSummaryHtml = STATUS_ORDER.map(s => {
-    const count = stats[s] || 0;
-    if (count === 0) return '';
-    return `
-      <div class="stat-card" style="cursor:pointer" onclick="applyStatusFilter('${s}')">
-        <div class="stat-number" style="color:${statusColor(s)}">${count}</div>
-        <div class="stat-label">${STATUS_LABELS[s] || s}</div>
       </div>`;
   }).join('');
 
@@ -1376,32 +1456,35 @@ function renderControl(container) {
   if (activeControlTab === 'ticket') {
     panelHtml = `
       <div class="fade-in" style="max-width: 650px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-card);">
-        <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">🎫 Construct New Ticket Context</h2>
+        <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; align-items:center; gap:8px;">
+          <span>🎫</span> Construct New Ticket Context
+        </h2>
         <form id="zaf-ticket-form" style="display:flex; flex-direction:column; gap:16px;">
           <div class="meta-field">
+            <label class="meta-label">Target Repo Context</label>
+            <select id="tkt-repo" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+              <option value="zo-agentic-framework" selected>zo-agentic-framework</option>
+              <option value="zo">zo</option>
+            </select>
+          </div>
+
+          <div class="meta-field">
             <label class="meta-label">Ticket Title</label>
-            <input type="text" id="tkt-title" required placeholder="e.g. Implement security headers" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; transition: border var(--t-fast);" />
+            <input type="text" id="tkt-title" required placeholder="e.g. Implement security headers" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; transition: border var(--t-fast); width:100%;" />
           </div>
           
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
             <div class="meta-field">
               <label class="meta-label">Phase Gate</label>
-              <select id="tkt-phase" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
-                <option value="P1">Phase 1 — Setup & Parser</option>
-                <option value="P2">Phase 2 — UI Core</option>
-                <option value="P3">Phase 3 — CLI Integration</option>
-                <option value="P4" selected>Phase 4 — Unified Control</option>
+              <select id="tkt-phase" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                <!-- Dynamically populated -->
               </select>
             </div>
             
             <div class="meta-field">
               <label class="meta-label">Workstream</label>
-              <select id="tkt-workstream" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
-                <option value="WS-CLI">WS-CLI — CLI harness</option>
-                <option value="WS-DASHBOARD">WS-DASHBOARD — Dashboard core</option>
-                <option value="WS-UX" selected>WS-UX — Premium styling</option>
-                <option value="WS-DOCS">WS-DOCS — Specifications</option>
-                <option value="none">none</option>
+              <select id="tkt-workstream" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                <!-- Dynamically populated -->
               </select>
             </div>
           </div>
@@ -1409,7 +1492,7 @@ function renderControl(container) {
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
             <div class="meta-field">
               <label class="meta-label">Priority</label>
-              <select id="tkt-priority" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
+              <select id="tkt-priority" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
                 <option value="P0">P0 — CRITICAL Block</option>
                 <option value="P1">P1 — High Priority</option>
                 <option value="P2" selected>P2 — Normal</option>
@@ -1419,28 +1502,17 @@ function renderControl(container) {
             
             <div class="meta-field">
               <label class="meta-label">Assigned Agent Tier</label>
-              <select id="tkt-role" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
-                <option value="engineering" selected>Engineering Core</option>
-                <option value="testing">Quality & Testing</option>
-                <option value="coo">Chief Operating Officer</option>
-                <option value="data">Data & AI Specialist</option>
-                <option value="security">Security Specialist</option>
-                <option value="sre">Site Reliability Engineer</option>
+              <select id="tkt-role" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                ${Object.keys(STATE.config.agents).map(k => `
+                  <option value="${k}">${STATE.config.agents[k].roleName} (${k})</option>
+                `).join('')}
               </select>
             </div>
           </div>
 
           <div class="meta-field">
-            <label class="meta-label">Target Repo Context</label>
-            <select id="tkt-repo" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
-              <option value="zo-agentic-framework" selected>zo-agentic-framework</option>
-              <option value="zo">zo</option>
-            </select>
-          </div>
-
-          <div class="meta-field">
             <label class="meta-label">Task Context & Description</label>
-            <textarea id="tkt-description" rows="5" required placeholder="Describe the goal, background context, and requirements for the agent harness to execute..." style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; resize: vertical; transition: border var(--t-fast);"></textarea>
+            <textarea id="tkt-description" rows="5" required placeholder="Describe the goal, background context, and requirements for the agent harness to execute..." style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; resize: vertical; transition: border var(--t-fast); width:100%;"></textarea>
           </div>
 
           <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
@@ -1451,16 +1523,19 @@ function renderControl(container) {
   } else if (activeControlTab === 'agents') {
     const agentKeys = Object.keys(STATE.config.agents);
     const selectedAgentKey = STATE.selectedAgentKey || agentKeys[0];
-    const agent = STATE.config.agents[selectedAgentKey];
+    const agent = STATE.config.agents[selectedAgentKey] || {
+      roleName: 'New Agent Profile', model: 'frontier', customModel: '', reasoning: 'high', heartbeat: 40, harness: 'claude-code', structuralRole: 'worker', manager: null, tools: []
+    };
 
     const agentOptions = agentKeys.map(k => `
       <option value="${k}" ${selectedAgentKey === k ? 'selected' : ''}>${STATE.config.agents[k].roleName} (${k})</option>
     `).join('');
 
     const modelOptions = [
-      { id: 'frontier', label: 'Frontier (Claude 3.7 Sonnet / GPT-4.5)' },
-      { id: 'normal', label: 'Normal (Claude 3.5 Haiku / GPT-4o-mini)' },
-      { id: 'reasoning', label: 'Reasoning (DeepSeek R1 / o3-mini)' }
+      { id: 'frontier', label: 'Frontier Preset (Claude 3.7 Sonnet / GPT-4.5)' },
+      { id: 'normal', label: 'Normal Preset (Claude 3.5 Haiku / GPT-4o-mini)' },
+      { id: 'reasoning', label: 'Reasoning Preset (DeepSeek R1 / o3-mini)' },
+      { id: 'custom', label: 'Custom Model Target (Specify string below)' }
     ].map(m => `
       <option value="${m.id}" ${agent.model === m.id ? 'selected' : ''}>${m.label}</option>
     `).join('');
@@ -1469,94 +1544,303 @@ function renderControl(container) {
       <option value="${l}" ${agent.reasoning === l ? 'selected' : ''}>${l.toUpperCase()}</option>
     `).join('');
 
-    const toolsList = ['FileSystem', 'ShellSubprocess', 'SecurityAudit', 'DBMigrator'].map(t => {
-      const active = agent.tools.includes(t);
+    const harnessOptions = [
+      { id: 'claude-code', label: 'Claude Code CLI harness (npx @anthropic-ai/claude-code)' },
+      { id: 'zo', label: 'ZO Sovereign Framework Harness (cli/zo.js)' },
+      { id: 'gemini-cli', label: 'Gemini Agent Core CLI (gemini-cli)' },
+      { id: 'mock', label: 'Mock Execution CLI wrapper (mock)' }
+    ].map(h => `
+      <option value="${h.id}" ${agent.harness === h.id ? 'selected' : ''}>${h.label}</option>
+    `).join('');
+
+    const structuralRoles = [
+      { id: 'thinker', label: '🧠 Thinker — Planner swarm director' },
+      { id: 'reviewer', label: '🛡️ Reviewer — QA & Security gate checker' },
+      { id: 'worker', label: '🛠️ Worker — Standard tasks compiler' }
+    ].map(r => `
+      <option value="${r.id}" ${agent.structuralRole === r.id ? 'selected' : ''}>${r.label}</option>
+    `).join('');
+
+    const supervisorOptions = `<option value="">None (Supervised by Operator)</option>` + agentKeys.filter(k => k !== selectedAgentKey).map(k => `
+      <option value="${k}" ${agent.manager === k ? 'selected' : ''}>${STATE.config.agents[k].roleName} (${k})</option>
+    `).join('');
+
+    const toolsRegistry = STATE.config.toolsRegistry || [];
+    const toolsList = toolsRegistry.map(t => {
+      const active = agent.tools && agent.tools.includes(t.id);
       return `
-        <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
-          <input type="checkbox" class="agent-tool-cb" value="${t}" ${active ? 'checked' : ''} style="accent-color:var(--indigo-400);" />
-          <span>${t}</span>
+        <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--text-secondary); cursor:pointer; margin-bottom: 6px;">
+          <input type="checkbox" class="agent-tool-cb" value="${t.id}" ${active ? 'checked' : ''} style="accent-color:var(--indigo-400); margin-top:2px;" />
+          <div>
+            <strong style="color:var(--text-primary);">${t.name}</strong>
+            <div style="font-size:10px; color:var(--text-muted);">${t.description}</div>
+          </div>
         </label>
       `;
     }).join('');
 
     const teamCards = STATE.config.org.teams.map(t => {
       const memberChips = t.members.map(m => {
-        const name = STATE.config.agents[m]?.roleName || m;
-        return `<span class="tag tag-repo" style="font-size:10px; margin:2px;">${name}</span>`;
+        const ag = STATE.config.agents[m];
+        if (!ag) return '';
+        const roleIcon = ag.structuralRole === 'thinker' ? '🧠 Planner' : (ag.structuralRole === 'reviewer' ? '🛡️ Auditor' : '🛠️ Worker');
+        const supervisorLabel = ag.manager ? `<span style="color:var(--text-muted); font-size:9px;"> (Reports to: ${ag.manager})</span>` : '';
+        return `
+          <div style="font-size:11px; padding:6px 10px; background:rgba(255,255,255,0.02); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); margin:4px; display:flex; justify-content:space-between; align-items:center; width:100%;">
+            <span><strong style="color:var(--text-primary);">${ag.roleName}</strong>${supervisorLabel}</span>
+            <span class="tag tag-repo" style="font-size:9px;">${roleIcon}</span>
+          </div>`;
       }).join('');
+
       return `
-        <div class="ws-deep-card" style="margin-bottom:12px; background: rgba(20,23,32,0.4);">
-          <div style="font-weight:600; color:var(--text-primary); font-size:12px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+        <div class="ws-deep-card" style="margin-bottom:16px; background: rgba(20,23,32,0.4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding:14px;">
+          <div style="font-weight:600; color:var(--text-primary); font-size:12px; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
             <span style="color:var(--indigo-400);">⊞</span> ${t.name}
           </div>
-          <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
-            Parent: ${t.parent ? STATE.config.org.teams.find(x => x.id === t.parent)?.name : 'None'}
+          <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:6px;">
+            Parent Team: ${t.parent ? STATE.config.org.teams.find(x => x.id === t.parent)?.name : 'Root level'}
           </div>
-          <div style="display:flex; flex-wrap:wrap;">${memberChips}</div>
+          <div style="display:flex; flex-direction:column; gap:4px;">${memberChips}</div>
         </div>
       `;
     }).join('');
 
     panelHtml = `
       <div class="fade-in" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items: start;">
-        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">👥 Agent Personality & Limits</h2>
-          <div class="meta-field" style="margin-bottom: 16px;">
-            <label class="meta-label">Select Agent Profile</label>
-            <select id="agent-selector" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-              ${agentOptions}
-            </select>
+        
+        <!-- Left Side: Agent Configurator & Creation -->
+        <div style="display:flex; flex-direction:column; gap:24px;">
+          
+          <!-- Agent Editor Card -->
+          <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
+              <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin:0;">👥 Agent Personality & Limits</h2>
+              <button class="btn btn-secondary" id="btn-toggle-new-agent" style="font-size:11px; padding:4px 10px;">➕ Add Agent</button>
+            </div>
+            
+            <!-- Dynamic Agent Selector -->
+            <div class="meta-field" style="margin-bottom: 16px;">
+              <label class="meta-label">Select Agent Profile</label>
+              <select id="agent-selector" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                ${agentOptions}
+              </select>
+            </div>
+
+            <!-- Agent Edit Form -->
+            <form id="zaf-agent-form" style="display:flex; flex-direction:column; gap:16px;">
+              <div class="meta-field">
+                <label class="meta-label">Assigned Role Name</label>
+                <input type="text" id="agent-name" required value="${agent.roleName}" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;" />
+              </div>
+
+              <div class="meta-field">
+                <label class="meta-label">Assigned Model Target preset</label>
+                <select id="agent-model" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                  ${modelOptions}
+                </select>
+              </div>
+
+              <div class="meta-field" id="custom-model-container">
+                <label class="meta-label">Custom Model String Specifier</label>
+                <input type="text" id="agent-custom-model" placeholder="e.g. claude-3-7-sonnet@latest" value="${agent.customModel || ''}" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;" />
+              </div>
+
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                <div class="meta-field">
+                  <label class="meta-label">Reasoning Level</label>
+                  <select id="agent-reasoning" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                    ${reasoningLevels}
+                  </select>
+                </div>
+                
+                <div class="meta-field">
+                  <label class="meta-label">Harness Tech / CLI</label>
+                  <select id="agent-harness" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                    ${harnessOptions}
+                  </select>
+                </div>
+              </div>
+
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+                <div class="meta-field">
+                  <label class="meta-label">Structural Planning Role</label>
+                  <select id="agent-struct-role" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                    ${structuralRoles}
+                  </select>
+                </div>
+                
+                <div class="meta-field">
+                  <label class="meta-label">Supervisor / Manager (N+1)</label>
+                  <select id="agent-manager" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                    ${supervisorOptions}
+                  </select>
+                </div>
+              </div>
+
+              <div class="meta-field">
+                <label class="meta-label" style="display:flex; justify-content:space-between;">
+                  <span>Heartbeat Interval Speed (Telemetry check frequency)</span>
+                  <span id="heartbeat-val" style="color:var(--indigo-400); font-family:monospace; font-weight:700;">${agent.heartbeat} seconds</span>
+                </label>
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <input type="range" id="agent-heartbeat" min="5" max="180" value="${agent.heartbeat}" style="flex:1; accent-color:var(--indigo-400);" />
+                </div>
+              </div>
+
+              <div class="meta-field">
+                <label class="meta-label">Authorized Tools Roster</label>
+                <div style="display:flex; flex-direction:column; gap:6px; background:var(--bg-input); border:1px solid var(--border-medium); padding:12px 14px; border-radius:var(--radius-sm);">
+                  ${toolsList || '<span style="color:var(--text-muted);font-size:11px">No tools in registry. Register some below!</span>'}
+                </div>
+              </div>
+
+              <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+                <span>💾</span> Save Personality & Limits
+              </button>
+            </form>
           </div>
 
-          <form id="zaf-agent-form" style="display:flex; flex-direction:column; gap:16px;">
-            <div class="meta-field">
-              <label class="meta-label">Assigned Model Target</label>
-              <select id="agent-model" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                ${modelOptions}
-              </select>
-            </div>
-
-            <div class="meta-field">
-              <label class="meta-label">Reasoning Level</label>
-              <select id="agent-reasoning" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                ${reasoningLevels}
-              </select>
-            </div>
-
-            <div class="meta-field">
-              <label class="meta-label" style="display:flex; justify-content:space-between;">
-                <span>Heartbeat Interval Speed</span>
-                <span id="heartbeat-val" style="color:var(--indigo-400); font-family:monospace;">${agent.heartbeat}s</span>
-              </label>
-              <div style="display:flex; align-items:center; gap:12px;">
-                <input type="range" id="agent-heartbeat" min="10" max="120" value="${agent.heartbeat}" style="flex:1; accent-color:var(--indigo-400);" />
+          <!-- Create New Agent Drawer (Collapsed by default) -->
+          <div id="new-agent-drawer" class="hidden" style="background: var(--bg-card); border: 1px solid var(--indigo-500); border-radius: var(--radius-lg); padding: 24px; box-shadow: drop-shadow(0 0 10px rgba(99,102,241,0.25));">
+            <h2 style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+              <span>➕ Build New Agent Ground-Up</span>
+              <span id="close-new-agent" style="cursor:pointer; color:var(--text-muted);">✕</span>
+            </h2>
+            <form id="zaf-create-agent-form" style="display:flex; flex-direction:column; gap:12px;">
+              <div class="meta-field">
+                <label class="meta-label">Unique Agent Key (alphanumeric ID)</label>
+                <input type="text" id="new-agent-key" required placeholder="e.g. backend-dev, security-audit" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
               </div>
-            </div>
-
-            <div class="meta-field">
-              <label class="meta-label">Authorized Tools Roster</label>
-              <div style="display:flex; flex-direction:column; gap:8px; background:var(--bg-input); border:1px solid var(--border-medium); padding:10px 14px; border-radius:var(--radius-sm);">
-                ${toolsList}
+              <div class="meta-field">
+                <label class="meta-label">Role Name (title)</label>
+                <input type="text" id="new-agent-name" required placeholder="e.g. Senior Backend Architect" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
               </div>
-            </div>
-
-            <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
-              <span>💾</span> Save Personality & Limits
-            </button>
-          </form>
+              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                <div class="meta-field">
+                  <label class="meta-label">Model Target</label>
+                  <select id="new-agent-model" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;">
+                    <option value="frontier">Frontier Preset</option>
+                    <option value="normal">Normal Preset</option>
+                    <option value="reasoning">Reasoning Preset</option>
+                  </select>
+                </div>
+                <div class="meta-field">
+                  <label class="meta-label">Harness Tech</label>
+                  <select id="new-agent-harness" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;">
+                    <option value="claude-code">Claude Code CLI</option>
+                    <option value="zo" selected>ZO Framework CLI</option>
+                    <option value="gemini-cli">Gemini Agent CLI</option>
+                    <option value="mock">Mock Engine</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-size: 12px; font-weight:600; padding:8px 12px;">Construct Dynamic Agent</button>
+            </form>
+          </div>
         </div>
 
-        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">🔀 Organization Chart & Teams</h2>
-          <div style="display:flex; flex-direction:column;">
-            ${teamCards}
+        <!-- Right Side: Organization & Nested Team Builder, Tools Registry -->
+        <div style="display:flex; flex-direction:column; gap:24px;">
+          
+          <!-- Org Chart Section -->
+          <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
+            <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+              <span>🔀 Organization Chart & Teams Hierarchy</span>
+              <button class="btn btn-secondary" id="btn-toggle-new-team" style="font-size:11px; padding:4px 10px;">➕ Create Team</button>
+            </h2>
+            
+            <div style="display:flex; flex-direction:column;">
+              ${teamCards}
+            </div>
+
+            <!-- Create Team Sub-form (Collapsed) -->
+            <div id="new-team-drawer" class="hidden" style="background: var(--bg-panel); border:1px solid var(--indigo-500); border-radius:var(--radius-md); padding:16px; margin-top:16px;">
+              <h3 style="font-size: 13px; font-weight:700; margin:0 0 12px; display:flex; justify-content:space-between;">
+                <span>➕ Construct New Nested Team</span>
+                <span id="close-new-team" style="cursor:pointer; color:var(--text-muted)">✕</span>
+              </h3>
+              <form id="zaf-create-team-form" style="display:flex; flex-direction:column; gap:10px;">
+                <div class="meta-field">
+                  <label class="meta-label">Unique Team ID</label>
+                  <input type="text" id="new-team-id" required placeholder="e.g. backend-team" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
+                </div>
+                <div class="meta-field">
+                  <label class="meta-label">Team Display Name</label>
+                  <input type="text" id="new-team-name" required placeholder="e.g. Backend Services Team" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
+                </div>
+                <div class="meta-field">
+                  <label class="meta-label">Parent Team Hierarchy</label>
+                  <select id="new-team-parent" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;">
+                    <option value="">None (Top level Org)</option>
+                    ${STATE.config.org.teams.map(t => `
+                      <option value="${t.id}">${t.name}</option>
+                    `).join('')}
+                  </select>
+                </div>
+                <div class="meta-field">
+                  <label class="meta-label">Select Members to Enroll</label>
+                  <div style="background: var(--bg-input); border: 1px solid var(--border-medium); padding:8px 10px; border-radius:var(--radius-sm); display:flex; flex-wrap:wrap; gap:8px;">
+                    ${agentKeys.map(k => `
+                      <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-secondary); cursor:pointer;">
+                        <input type="checkbox" class="team-member-cb" value="${k}" style="accent-color:var(--indigo-400);" />
+                        <span>${STATE.config.agents[k].roleName}</span>
+                      </label>
+                    `).join('')}
+                  </div>
+                </div>
+                <button type="submit" class="btn btn-primary" style="font-size:11px; padding:6px 12px; font-weight:600; width:100%;">Establish Team Swarm</button>
+              </form>
+            </div>
+          </div>
+
+          <!-- Tools Registry Section -->
+          <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
+            <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+              <span>🛠️ Global Tools Registry & Capabilities</span>
+              <button class="btn btn-secondary" id="btn-toggle-new-tool" style="font-size:11px; padding:4px 10px;">➕ Register Tool</button>
+            </h2>
+
+            <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
+              ${toolsRegistry.map(t => `
+                <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:10px 14px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <span style="font-weight:700; color:var(--indigo-400); font-family:monospace; font-size:12px;">${t.id}</span>
+                    <span style="font-size:11px; font-weight:600; color:var(--text-primary);">${t.name}</span>
+                  </div>
+                  <div style="font-size:10px; color:var(--text-muted); line-height:1.4;">${t.description}</div>
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- Create Tool Form (Collapsed) -->
+            <div id="new-tool-drawer" class="hidden" style="background: var(--bg-panel); border:1px solid var(--indigo-500); border-radius:var(--radius-md); padding:16px;">
+              <h3 style="font-size: 13px; font-weight:700; margin:0 0 12px; display:flex; justify-content:space-between;">
+                <span>➕ Register Custom CLI Capability Tool</span>
+                <span id="close-new-tool" style="cursor:pointer; color:var(--text-muted)">✕</span>
+              </h3>
+              <form id="zaf-register-tool-form" style="display:flex; flex-direction:column; gap:10px;">
+                <div class="meta-field">
+                  <label class="meta-label">Tool ID Keyword</label>
+                  <input type="text" id="new-tool-id" required placeholder="e.g. PyLinter, DockerCompose" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
+                </div>
+                <div class="meta-field">
+                  <label class="meta-label">Tool Name</label>
+                  <input type="text" id="new-tool-name" required placeholder="e.g. Python Source Code Linter" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
+                </div>
+                <div class="meta-field">
+                  <label class="meta-label">Tool Capability Explanation & Bounds</label>
+                  <input type="text" id="new-tool-desc" required placeholder="Describe what actions the agent CLI is allowed to execute with this tool..." style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
+                </div>
+                <button type="submit" class="btn btn-primary" style="font-size:11px; padding:6px 12px; font-weight:600; width:100%;">Enroll Dynamic Tool</button>
+              </form>
+            </div>
           </div>
         </div>
       </div>`;
   } else if (activeControlTab === 'usage') {
     const limit = STATE.config.subscriptions.weeklyLimitHours;
     const used = STATE.config.subscriptions.weeklyUsedHours;
-    const pct = ((used / limit) * 100).toFixed(0);
+    const pct = ((used / limit) * 100).toFixed(2);
 
     const projectRows = STATE.config.analytics.projects.map(p => `
       <tr>
@@ -1568,23 +1852,23 @@ function renderControl(container) {
     panelHtml = `
       <div class="fade-in" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px;">
         <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; text-align:center; display:flex; flex-direction:column; align-items:center;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; width:100%; text-align:left;">📊 Weekly Usage Quota</h2>
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; width:100%; text-align:left;">📊 Weekly Usage Quota (REAL TIME TELEMETRY)</h2>
           
           <div style="position:relative; width:180px; height:180px; display:flex; align-items:center; justify-content:center; margin-bottom:20px;">
             <svg width="180" height="180" viewBox="0 0 100 100">
               <circle cx="50" cy="50" r="40" stroke="var(--border-medium)" stroke-width="6" fill="transparent" />
               <circle cx="50" cy="50" r="40" stroke="var(--indigo-500)" stroke-width="6" fill="transparent" 
-                      stroke-dasharray="${2 * Math.PI * 40}" stroke-dashoffset="${2 * Math.PI * 40 * (1 - used / limit)}" stroke-linecap="round"
+                      stroke-dasharray="${2 * Math.PI * 40}" stroke-dashoffset="${2 * Math.PI * 40 * (1 - Math.min(used, limit) / limit)}" stroke-linecap="round"
                       transform="rotate(-90 50 50)" style="filter: drop-shadow(0 0 4px rgba(99,102,241,0.4))" />
             </svg>
             <div style="position:absolute; text-align:center;">
-              <div style="font-size:24px; font-weight:700; color:var(--text-primary); font-family:'JetBrains Mono', monospace;">${pct}%</div>
-              <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Used</div>
+              <div style="font-size:20px; font-weight:700; color:var(--text-primary); font-family:'JetBrains Mono', monospace;">${pct}%</div>
+              <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Consumed</div>
             </div>
           </div>
 
-          <div style="font-size:12px; color:var(--text-secondary); line-height:1.6; max-width:280px; text-align:center;">
-            Running under Move Capital Developer Suite. You have consumed <strong style="color:var(--text-primary); font-family:monospace;">${used} hours</strong> out of your <strong style="color:var(--text-primary); font-family:monospace;">${limit} hours</strong> weekly budget.
+          <div style="font-size:12px; color:var(--text-secondary); line-height:1.6; max-width:320px; text-align:center;">
+            Running under Move Capital Developer Suite. Telemetry accumulates run execution timings of local harness sidecars. You have consumed <strong style="color:var(--text-primary); font-family:monospace; font-size:13px;">${used.toFixed(5)} hours</strong> out of your <strong style="color:var(--text-primary); font-family:monospace; font-size:13px;">${limit} hours</strong> weekly budget.
           </div>
         </div>
 
@@ -1621,12 +1905,62 @@ function renderControl(container) {
       </div>
     </div>`;
 
+  // --- TAB CLICK HANDLERS ---
   container.querySelectorAll('.control-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       activeControlTab = btn.dataset.tab;
       renderControl(container);
     });
   });
+
+  // --- TICKET BUILDER HANDLERS ---
+  const tktRepo = container.querySelector('#tkt-repo');
+  if (tktRepo) {
+    const updateSelectors = () => {
+      const repo = tktRepo.value;
+      const phaseSel = container.querySelector('#tkt-phase');
+      const wsSel = container.querySelector('#tkt-workstream');
+      if (!phaseSel || !wsSel) return;
+      
+      if (repo === 'zo') {
+        phaseSel.innerHTML = `
+          <option value="P0">Phase 0 — Baseline Lock</option>
+          <option value="P1" selected>Phase 1 — Design Lock</option>
+          <option value="P2">Phase 2 — Shell V1</option>
+          <option value="P3">Phase 3 — Services & Data Stabilisation</option>
+          <option value="P4">Phase 4 — Dual-Import</option>
+          <option value="P5">Phase 5 — Attio Cutover</option>
+          <option value="P6">Phase 6 — Intelligence Layer</option>
+        `;
+        wsSel.innerHTML = `
+          <option value="WS-UX" selected>WS-UX — UX & Design</option>
+          <option value="WS-SHELL">WS-SHELL — Platform Shell</option>
+          <option value="WS-DATA">WS-DATA — Data Layer</option>
+          <option value="WS-SERVICES">WS-SERVICES — Services Stabilisation</option>
+          <option value="WS-CRM">WS-CRM — CRM Transition</option>
+          <option value="WS-INTELLIGENCE">WS-INTELLIGENCE — Intelligence Layer</option>
+          <option value="WS-ASSISTANT">WS-ASSISTANT — ZO Assistant</option>
+          <option value="WS-REPOS">WS-REPOS — Repo Rationalisation</option>
+        `;
+      } else {
+        phaseSel.innerHTML = `
+          <option value="P1">Phase 1 — Multi-Repo Dashboard</option>
+          <option value="P2">Phase 2 — Framework Documentation</option>
+          <option value="P3">Phase 3 — CLI Integration</option>
+          <option value="P4" selected>Phase 4 — Unified Control</option>
+        `;
+        wsSel.innerHTML = `
+          <option value="WS-CLI">WS-CLI — CLI harness</option>
+          <option value="WS-DASHBOARD">WS-DASHBOARD — Dashboard core</option>
+          <option value="WS-UX" selected>WS-UX — Premium styling</option>
+          <option value="WS-DOCS">WS-DOCS — Specifications</option>
+          <option value="none">none</option>
+        `;
+      }
+    };
+    tktRepo.addEventListener('change', updateSelectors);
+    updateSelectors();
+  }
 
   const ticketForm = container.querySelector('#zaf-ticket-form');
   if (ticketForm) {
@@ -1657,6 +1991,7 @@ function renderControl(container) {
     });
   }
 
+  // --- AGENT EDITOR HANDLERS ---
   const agentSelector = container.querySelector('#agent-selector');
   if (agentSelector) {
     agentSelector.addEventListener('change', () => {
@@ -1665,11 +2000,23 @@ function renderControl(container) {
     });
   }
 
+  const agentModelSelect = container.querySelector('#agent-model');
+  if (agentModelSelect) {
+    const checkCustomModelVisibility = () => {
+      const containerDiv = container.querySelector('#custom-model-container');
+      if (containerDiv) {
+        containerDiv.style.display = agentModelSelect.value === 'custom' ? 'block' : 'none';
+      }
+    };
+    agentModelSelect.addEventListener('change', checkCustomModelVisibility);
+    checkCustomModelVisibility();
+  }
+
   const heartbeatSlider = container.querySelector('#agent-heartbeat');
   if (heartbeatSlider) {
     heartbeatSlider.addEventListener('input', () => {
       const displayVal = container.querySelector('#heartbeat-val');
-      if (displayVal) displayVal.textContent = heartbeatSlider.value + 's';
+      if (displayVal) displayVal.textContent = heartbeatSlider.value + ' seconds';
     });
   }
 
@@ -1678,8 +2025,13 @@ function renderControl(container) {
     agentForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const selectKey = agentSelector.value;
+      const name = document.getElementById('agent-name').value;
       const model = document.getElementById('agent-model').value;
+      const customModel = document.getElementById('agent-custom-model').value;
       const reasoning = document.getElementById('agent-reasoning').value;
+      const harness = document.getElementById('agent-harness').value;
+      const structRole = document.getElementById('agent-struct-role').value;
+      const manager = document.getElementById('agent-manager').value || null;
       const heartbeat = parseInt(heartbeatSlider.value, 10);
       
       const tools = [];
@@ -1687,8 +2039,13 @@ function renderControl(container) {
         tools.push(cb.value);
       });
 
+      STATE.config.agents[selectKey].roleName = name;
       STATE.config.agents[selectKey].model = model;
+      STATE.config.agents[selectKey].customModel = customModel;
       STATE.config.agents[selectKey].reasoning = reasoning;
+      STATE.config.agents[selectKey].harness = harness;
+      STATE.config.agents[selectKey].structuralRole = structRole;
+      STATE.config.agents[selectKey].manager = manager;
       STATE.config.agents[selectKey].heartbeat = heartbeat;
       STATE.config.agents[selectKey].tools = tools;
 
@@ -1703,6 +2060,163 @@ function renderControl(container) {
         renderControl(container);
       } catch (err) {
         alert(`❌ Failed persisting configs: ${err.message}`);
+      }
+    });
+  }
+
+  // --- DRAWERS TOGGLES HANDLERS ---
+  const toggleBtnAgent = container.querySelector('#btn-toggle-new-agent');
+  if (toggleBtnAgent) {
+    toggleBtnAgent.addEventListener('click', () => {
+      container.querySelector('#new-agent-drawer')?.classList.toggle('hidden');
+    });
+  }
+  container.querySelector('#close-new-agent')?.addEventListener('click', () => {
+    container.querySelector('#new-agent-drawer')?.classList.add('hidden');
+  });
+
+  const toggleBtnTeam = container.querySelector('#btn-toggle-new-team');
+  if (toggleBtnTeam) {
+    toggleBtnTeam.addEventListener('click', () => {
+      container.querySelector('#new-team-drawer')?.classList.toggle('hidden');
+    });
+  }
+  container.querySelector('#close-new-team')?.addEventListener('click', () => {
+    container.querySelector('#new-team-drawer')?.classList.add('hidden');
+  });
+
+  const toggleBtnTool = container.querySelector('#btn-toggle-new-tool');
+  if (toggleBtnTool) {
+    toggleBtnTool.addEventListener('click', () => {
+      container.querySelector('#new-tool-drawer')?.classList.toggle('hidden');
+    });
+  }
+  container.querySelector('#close-new-tool')?.addEventListener('click', () => {
+    container.querySelector('#new-tool-drawer')?.classList.add('hidden');
+  });
+
+  // --- NEW AGENT CREATION HANDLER ---
+  const createAgentForm = container.querySelector('#zaf-create-agent-form');
+  if (createAgentForm) {
+    createAgentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const key = document.getElementById('new-agent-key').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+      const name = document.getElementById('new-agent-name').value;
+      const model = document.getElementById('new-agent-model').value;
+      const harness = document.getElementById('new-agent-harness').value;
+
+      if (!key) {
+        alert('❌ Error: Key must contain only lowercase letters, digits, and hyphens!');
+        return;
+      }
+      if (STATE.config.agents[key]) {
+        alert('❌ Error: An agent with this key already exists!');
+        return;
+      }
+
+      // Add default personality mappings
+      STATE.config.agents[key] = {
+        roleName: name,
+        model: model,
+        customModel: '',
+        reasoning: 'high',
+        heartbeat: 40,
+        harness: harness,
+        structuralRole: 'worker',
+        manager: null,
+        tools: ['FileSystem']
+      };
+
+      try {
+        const res = await fetch('/api/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(STATE.config)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        alert(`🟢 Successfully created and registered new agent: ${name}`);
+        STATE.selectedAgentKey = key;
+        renderControl(container);
+      } catch (err) {
+        alert(`❌ Failed creating agent: ${err.message}`);
+      }
+    });
+  }
+
+  // --- NEW TEAM CREATION HANDLER ---
+  const createTeamForm = container.querySelector('#zaf-create-team-form');
+  if (createTeamForm) {
+    createTeamForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('new-team-id').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
+      const name = document.getElementById('new-team-name').value;
+      const parent = document.getElementById('new-team-parent').value || null;
+
+      if (!id) {
+        alert('❌ Error: Team ID must contain only alphanumeric characters and hyphens!');
+        return;
+      }
+      if (STATE.config.org.teams.find(t => t.id === id)) {
+        alert('❌ Error: A team with this ID already exists!');
+        return;
+      }
+
+      const members = [];
+      container.querySelectorAll('.team-member-cb:checked').forEach(cb => {
+        members.push(cb.value);
+      });
+
+      STATE.config.org.teams.push({ id, name, parent, members });
+
+      try {
+        const res = await fetch('/api/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(STATE.config)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        alert(`🟢 Successfully created team "${name}" inside organization chart!`);
+        renderControl(container);
+      } catch (err) {
+        alert(`❌ Failed creating team: ${err.message}`);
+      }
+    });
+  }
+
+  // --- NEW TOOL REGISTRATION HANDLER ---
+  const registerToolForm = container.querySelector('#zaf-register-tool-form');
+  if (registerToolForm) {
+    registerToolForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const id = document.getElementById('new-tool-id').value.replace(/[^a-zA-Z0-9]/g, '');
+      const name = document.getElementById('new-tool-name').value;
+      const description = document.getElementById('new-tool-desc').value;
+
+      if (!id) {
+        alert('❌ Error: Tool ID must be purely alphanumeric (no spaces)!');
+        return;
+      }
+      if (!STATE.config.toolsRegistry) {
+        STATE.config.toolsRegistry = [];
+      }
+      if (STATE.config.toolsRegistry.find(t => t.id === id)) {
+        alert('❌ Error: A tool with this ID already exists in the registry!');
+        return;
+      }
+
+      STATE.config.toolsRegistry.push({ id, name, description });
+
+      try {
+        const res = await fetch('/api/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(STATE.config)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        alert(`🟢 Dynamic tool "${name}" successfully enrolled into registry!`);
+        renderControl(container);
+      } catch (err) {
+        alert(`❌ Failed enrolling tool: ${err.message}`);
       }
     });
   }

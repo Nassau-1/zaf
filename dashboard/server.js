@@ -103,6 +103,8 @@ function spawnAgent(ticketId, role, harness, model, reasoning, heartbeat) {
   if (reasoning) args.push('--reasoning', reasoning);
   if (heartbeat) args.push('--heartbeat', heartbeat);
 
+  const startTime = Date.now();
+
   const child = spawn('node', args, {
     cwd: path.resolve(__dirname, '..'),
     env: {
@@ -132,9 +134,39 @@ function spawnAgent(ticketId, role, harness, model, reasoning, heartbeat) {
   });
 
   child.on('close', (code) => {
-    const exitMsg = `[ZAF Control] Subprocess harness terminated with exit code: ${code}`;
+    const endTime = Date.now();
+    const durationSec = (endTime - startTime) / 1000;
+    const durationHours = durationSec / 3600;
+
+    const exitMsg = `[ZAF Control] Subprocess harness terminated with exit code: ${code} (Duration: ${durationSec.toFixed(2)}s)`;
     console.log(exitMsg);
     broadcastLog(exitMsg);
+
+    // Update telemetry in config.json
+    try {
+      const configFiles = [
+        path.join(__dirname, 'config.json'),
+        path.join(__dirname, 'dist', 'config.json')
+      ];
+      for (const configPath of configFiles) {
+        if (fs.existsSync(configPath)) {
+          const conf = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+          conf.subscriptions.weeklyUsedHours = parseFloat((conf.subscriptions.weeklyUsedHours + durationHours).toFixed(5));
+          
+          // Accumulate tokens (e.g. 850 tokens per run-second, or at least 1500 tokens)
+          const tokenIncrement = Math.max(1200, Math.round(durationSec * 950));
+          const project = conf.analytics.projects.find(p => p.id === 'zo-agentic-framework');
+          if (project) {
+            project.tokensConsumed += tokenIncrement;
+          }
+          fs.writeFileSync(configPath, JSON.stringify(conf, null, 2), 'utf8');
+        }
+      }
+      console.log(`[ZAF Control] Telemetry updated: +${(durationSec).toFixed(2)}s, +${durationHours.toFixed(6)} hrs`);
+    } catch (e) {
+      console.error('[ZAF Control] Failed updating telemetry counters:', e.message);
+    }
+
     pushReload();
   });
 }

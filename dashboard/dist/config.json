@@ -9,47 +9,77 @@
       { "id": "zo-agentic-framework", "tokensConsumed": 1284500 }
     ]
   },
+  "toolsRegistry": [
+    { "id": "FileSystem", "name": "FileSystem Access", "description": "Read/write workspace files & dynamic transient harnesses." },
+    { "id": "ShellSubprocess", "name": "ShellSubprocess Exec", "description": "Spawn CLI commands, run compilers, execute build/test runners." },
+    { "id": "SecurityAudit", "name": "SecurityAudit Scanner", "description": "Execute code vulnerabilities audit and packages checks." },
+    { "id": "DBMigrator", "name": "DBMigrator Integrator", "description": "Manage database schemas, execute custom SQL scripts and migrations." }
+  ],
   "agents": {
     "coo": {
       "roleName": "Chief Operating Officer",
       "model": "frontier",
+      "customModel": "",
       "reasoning": "high",
       "heartbeat": 50,
+      "harness": "zo",
+      "structuralRole": "thinker",
+      "manager": null,
       "tools": ["FileSystem", "ShellSubprocess", "SecurityAudit"]
     },
     "engineering": {
       "roleName": "Engineering Core",
       "model": "frontier",
+      "customModel": "",
       "reasoning": "high",
       "heartbeat": 40,
+      "harness": "claude-code",
+      "structuralRole": "worker",
+      "manager": "coo",
       "tools": ["FileSystem", "ShellSubprocess"]
     },
     "testing": {
       "roleName": "Quality & Testing",
       "model": "normal",
+      "customModel": "",
       "reasoning": "medium",
       "heartbeat": 30,
+      "harness": "claude-code",
+      "structuralRole": "reviewer",
+      "manager": "coo",
       "tools": ["FileSystem", "ShellSubprocess"]
     },
     "data": {
       "roleName": "Data & AI Specialist",
       "model": "normal",
+      "customModel": "",
       "reasoning": "high",
       "heartbeat": 45,
+      "harness": "gemini-cli",
+      "structuralRole": "worker",
+      "manager": "coo",
       "tools": ["FileSystem"]
     },
     "security": {
       "roleName": "Security Specialist",
       "model": "frontier",
+      "customModel": "",
       "reasoning": "high",
       "heartbeat": 60,
+      "harness": "zo",
+      "structuralRole": "reviewer",
+      "manager": "coo",
       "tools": ["FileSystem", "SecurityAudit"]
     },
     "sre": {
       "roleName": "Site Reliability Engineer",
       "model": "normal",
+      "customModel": "",
       "reasoning": "medium",
       "heartbeat": 30,
+      "harness": "mock",
+      "structuralRole": "worker",
+      "manager": "coo",
       "tools": ["FileSystem", "ShellSubprocess"]
     }
   },
