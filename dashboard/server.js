@@ -94,11 +94,16 @@ function runParse() {
   }
 }
 
-function spawnAgent(ticketId, role, harness) {
+function spawnAgent(ticketId, role, harness, model, reasoning, heartbeat) {
   console.log(`[ZAF Control] Spawning agent for ticket ${ticketId}, role ${role}, harness ${harness}`);
   const zoScript = path.join(__dirname, '..', 'cli', 'zo.js');
   
-  const child = spawn('node', [zoScript, 'run', role, '--ticket', ticketId, '--harness', harness], {
+  const args = [zoScript, 'run', role, '--ticket', ticketId, '--harness', harness];
+  if (model) args.push('--model', model);
+  if (reasoning) args.push('--reasoning', reasoning);
+  if (heartbeat) args.push('--heartbeat', heartbeat);
+
+  const child = spawn('node', args, {
     cwd: path.resolve(__dirname, '..'),
     env: {
       ...process.env,
@@ -187,6 +192,9 @@ const server = http.createServer((req, res) => {
     const ticketId = parsed.query.ticket || '';
     const role = parsed.query.role || 'engineering';
     const harness = parsed.query.harness || 'mock';
+    const model = parsed.query.model || '';
+    const reasoning = parsed.query.reasoning || '';
+    const heartbeat = parsed.query.heartbeat || '';
 
     if (!ticketId) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -195,10 +203,10 @@ const server = http.createServer((req, res) => {
     }
 
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'spawning', ticket: ticketId, role, harness }));
+    res.end(JSON.stringify({ status: 'spawning', ticket: ticketId, role, harness, model, reasoning, heartbeat }));
 
     // Spawn subprocess and stream output via SSE
-    spawnAgent(ticketId, role, harness);
+    spawnAgent(ticketId, role, harness, model, reasoning, heartbeat);
     return;
   }
 
@@ -207,6 +215,163 @@ const server = http.createServer((req, res) => {
     pushReload();
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok', msg: 'Sync broadcasted' }));
+    return;
+  }
+
+  // ── Get Config endpoint ───────────────────────────────────────────────────
+  if (pathname === '/api/config') {
+    const configPath = path.join(__dirname, 'config.json');
+    try {
+      const data = fs.readFileSync(configPath, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(data);
+    } catch {
+      res.writeHead(500, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Failed to read config.json' }));
+    }
+    return;
+  }
+
+  // ── Save Config endpoint ──────────────────────────────────────────────────
+  if (pathname === '/api/config/save' && req.method === 'POST') {
+    let bodyData = '';
+    req.on('data', chunk => { bodyData += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(bodyData);
+        const configPath = path.join(__dirname, 'config.json');
+        fs.writeFileSync(configPath, JSON.stringify(payload, null, 2), 'utf8');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok' }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Malformed POST JSON payload' }));
+      }
+    });
+    return;
+  }
+
+  // ── Create Ticket endpoint ────────────────────────────────────────────────
+  if (pathname === '/api/ticket/create' && req.method === 'POST') {
+    let bodyData = '';
+    req.on('data', chunk => { bodyData += chunk; });
+    req.on('end', () => {
+      try {
+        const payload = JSON.parse(bodyData);
+        if (!payload.title) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Missing title parameter' }));
+          return;
+        }
+
+        let maxNum = 0;
+        const activeDir = path.join(REPOS_ROOT, 'zo-agentic-framework', 'WIP', 'tickets', 'ACTIVE');
+        const archivedDir = path.join(REPOS_ROOT, 'zo-agentic-framework', 'WIP', 'tickets', 'ARCHIVED');
+        const indexFile = path.join(REPOS_ROOT, 'zo-agentic-framework', 'WIP', 'tickets', 'TICKETS.md');
+
+        if (!fs.existsSync(activeDir)) fs.mkdirSync(activeDir, { recursive: true });
+
+        const activeFiles = fs.existsSync(activeDir) ? fs.readdirSync(activeDir) : [];
+        const archivedFiles = fs.existsSync(archivedDir) ? fs.readdirSync(archivedDir) : [];
+        const allFiles = activeFiles.concat(archivedFiles);
+
+        for (const f of allFiles) {
+          const match = f.match(/TKT-ZAF-(\d+)\.md$/i);
+          if (match) {
+            maxNum = Math.max(maxNum, parseInt(match[1], 10));
+          }
+        }
+        const nextNum = maxNum + 1;
+        const ticketId = `TKT-ZAF-${String(nextNum).padStart(4, '0')}`;
+        const currentDate = new Date().toISOString().slice(0, 10);
+        
+        const ticketContent = `---
+id: ${ticketId}
+title: ${payload.title}
+status: OPEN
+programme: PROG-ZAF-001
+workstream: ${payload.workstream || 'none'}
+phase: ${payload.phase || 'P3'}
+priority: ${payload.priority || 'P2'}
+project: ZO Agentic Framework
+repo: ${payload.repo || 'zo-agentic-framework'}
+team: engineering
+roles: [${payload.role || 'antigravity-ide'}]
+archetype: BUILD
+blocks: []
+blocked_by: []
+created: ${currentDate}
+updated: ${currentDate}
+usage_checkpoint: LOW
+---
+
+## Context
+
+${payload.description || 'Task context and description.'}
+
+## Task
+
+1.  Scaffold and build features.
+
+## Acceptance Criteria
+
+- [ ] Command compiles and runs successfully.
+
+## Handoff Log
+
+- ${currentDate} | operator | OPEN — Ticket created via Control Center.
+`;
+
+        fs.writeFileSync(path.join(activeDir, `${ticketId}.md`), ticketContent, 'utf8');
+
+        // Update TICKETS.md index
+        if (fs.existsSync(indexFile)) {
+          let idxContent = fs.readFileSync(indexFile, 'utf8');
+          const lines = idxContent.split(/\r?\n/);
+          let pGateHeaderIdx = -1;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes(`### Phase 4 — Unified Control Interface`)) {
+              pGateHeaderIdx = i;
+              break;
+            }
+          }
+          if (pGateHeaderIdx !== -1) {
+            let lastRow = -1;
+            for (let j = pGateHeaderIdx + 1; j < lines.length; j++) {
+              if (lines[j].trim().startsWith('|') && lines[j].includes('TKT-ZAF-')) {
+                lastRow = j;
+              }
+              if (lines[j].trim().startsWith('---') || (lines[j].trim().startsWith('##') && !lines[j].trim().startsWith('###'))) {
+                break;
+              }
+            }
+            const newRow = `| ${ticketId} | ${payload.title} | PROG-ZAF-001 | ${payload.workstream || 'none'} | OPEN | ${currentDate} |`;
+            if (lastRow !== -1) {
+              lines.splice(lastRow + 1, 0, newRow);
+            } else {
+              lines.splice(pGateHeaderIdx + 3, 0, newRow);
+            }
+            
+            let nextIdNum = nextNum + 1;
+            const nextIdStr = `TKT-ZAF-${String(nextIdNum).padStart(4, '0')}`;
+            idxContent = lines.join('\n')
+              .replace(/Next ticket number:\s*\*\*TKT-ZAF-\d+\*\*/g, `Next ticket number: **${nextIdStr}**`)
+              .replace(/Next ticket number:\s*TKT-ZAF-\d+/g, `Next ticket number: ${nextIdStr}`);
+            
+            fs.writeFileSync(indexFile, idxContent, 'utf8');
+          }
+        }
+
+        runParse();
+        pushReload();
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', ticketId }));
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Malformed POST JSON payload' }));
+      }
+    });
     return;
   }
 

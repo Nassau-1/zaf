@@ -1,0 +1,85 @@
+{
+  "subscriptions": {
+    "weeklyLimitHours": 20,
+    "weeklyUsedHours": 4.2
+  },
+  "analytics": {
+    "projects": [
+      { "id": "zo", "tokensConsumed": 42100800 },
+      { "id": "zo-agentic-framework", "tokensConsumed": 1284500 }
+    ]
+  },
+  "agents": {
+    "coo": {
+      "roleName": "Chief Operating Officer",
+      "model": "frontier",
+      "reasoning": "high",
+      "heartbeat": 50,
+      "tools": ["FileSystem", "ShellSubprocess", "SecurityAudit"]
+    },
+    "engineering": {
+      "roleName": "Engineering Core",
+      "model": "frontier",
+      "reasoning": "high",
+      "heartbeat": 40,
+      "tools": ["FileSystem", "ShellSubprocess"]
+    },
+    "testing": {
+      "roleName": "Quality & Testing",
+      "model": "normal",
+      "reasoning": "medium",
+      "heartbeat": 30,
+      "tools": ["FileSystem", "ShellSubprocess"]
+    },
+    "data": {
+      "roleName": "Data & AI Specialist",
+      "model": "normal",
+      "reasoning": "high",
+      "heartbeat": 45,
+      "tools": ["FileSystem"]
+    },
+    "security": {
+      "roleName": "Security Specialist",
+      "model": "frontier",
+      "reasoning": "high",
+      "heartbeat": 60,
+      "tools": ["FileSystem", "SecurityAudit"]
+    },
+    "sre": {
+      "roleName": "Site Reliability Engineer",
+      "model": "normal",
+      "reasoning": "medium",
+      "heartbeat": 30,
+      "tools": ["FileSystem", "ShellSubprocess"]
+    }
+  },
+  "org": {
+    "name": "Move Capital Org",
+    "teams": [
+      {
+        "id": "ops-team",
+        "name": "Operations Team",
+        "parent": null,
+        "members": ["coo", "sre"]
+      },
+      {
+        "id": "dev-team",
+        "name": "Development & QA Team",
+        "parent": "ops-team",
+        "members": ["engineering", "testing"]
+      },
+      {
+        "id": "intelligence-team",
+        "name": "AI & Data Team",
+        "parent": "ops-team",
+        "members": ["data"]
+      },
+      {
+        "id": "security-team",
+        "name": "Security Team",
+        "parent": "ops-team",
+        "members": ["security"]
+      }
+    ]
+  }
+}

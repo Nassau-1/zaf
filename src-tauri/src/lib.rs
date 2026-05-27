@@ -13,21 +13,44 @@ fn trigger_notification(app: &tauri::AppHandle, title: &str, body: &str) {
 }
 
 #[tauri::command]
-fn spawn_agent_run(app: tauri::AppHandle, ticket_id: String, role: String, harness: String) -> Result<(), String> {
+fn spawn_agent_run(
+  app: tauri::AppHandle,
+  ticket_id: String,
+  role: String,
+  harness: String,
+  model: String,
+  reasoning: String,
+  heartbeat: String,
+) -> Result<(), String> {
   use std::io::{BufRead, BufReader};
   use std::process::{Command, Stdio};
 
-  println!("[ZAF Control] spawn_agent_run invoked: {} {} {}", ticket_id, role, harness);
+  println!(
+    "[ZAF Control] spawn_agent_run invoked: {} {} {} (Model: {}, Reasoning: {}, Heartbeat: {})",
+    ticket_id, role, harness, model, reasoning, heartbeat
+  );
 
   std::thread::spawn(move || {
-    let mut child = match Command::new("node")
-      .arg("cli/zo.js")
+    let mut cmd = Command::new("node");
+    cmd.arg("cli/zo.js")
       .arg("run")
       .arg(&role)
       .arg("--ticket")
       .arg(&ticket_id)
       .arg("--harness")
-      .arg(&harness)
+      .arg(&harness);
+
+    if !model.is_empty() {
+      cmd.arg("--model").arg(&model);
+    }
+    if !reasoning.is_empty() {
+      cmd.arg("--reasoning").arg(&reasoning);
+    }
+    if !heartbeat.is_empty() {
+      cmd.arg("--heartbeat").arg(&heartbeat);
+    }
+
+    let mut child = match cmd
       .stdout(Stdio::piped())
       .stderr(Stdio::piped())
       .spawn()

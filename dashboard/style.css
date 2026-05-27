@@ -1549,3 +1549,69 @@ html, body {
   .sidebar-repo-selector { display: none; }
   #detail-panel { width: 100vw; position: fixed; top: 0; right: 0; bottom: 0; z-index: 100; }
 }
+
+/* ─── ZAF Control Center Styles ──────────────────────────────── */
+input[type="text"]:focus, textarea:focus, select:focus {
+  border-color: var(--indigo-400) !important;
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.2);
+}
+.control-tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+}
+.control-tab-btn.active {
+  background: var(--bg-card) !important;
+  border-color: var(--border-medium) !important;
+  color: var(--text-primary) !important;
+  box-shadow: var(--shadow-card);
+}
+.agent-tool-cb {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+input[type="range"] {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border-medium);
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--indigo-400);
+  box-shadow: 0 0 6px rgba(99, 102, 241, 0.6);
+  transition: transform var(--t-fast);
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+}
+
+/* ─── Trace Telemetry Console Lines ─────────────────────────── */
+.console-line.stdout {
+  color: #c5c9db;
+}
+.console-line.tool-call {
+  color: var(--amber-400) !important;
+  font-weight: 500;
+}
+.console-line.api-request {
+  color: #34d399 !important;
+  font-weight: 500;
+}
+.console-line.decision {
+  color: var(--status-in-review) !important;
+  font-weight: 600;
+}
+.console-line.system {
+  color: var(--text-link) !important;
+}
+.console-line.stderr {
+  color: var(--status-blocked) !important;
+}
+

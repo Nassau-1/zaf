@@ -97,10 +97,16 @@ console.log('\n======================================================');
 console.log('🧪 TEST 2: .zaf-skill.md Compilation & Mount Declarations');
 console.log('======================================================');
 
-const ticketId = 'TKT-ZAF-0006';
-const testTicketPath = path.join(ACTIVE_DIR, `${ticketId}.md`);
+let ticketId = 'TKT-ZAF-0010';
+let testTicketPath = path.join(ACTIVE_DIR, `${ticketId}.md`);
 if (!fs.existsSync(testTicketPath)) {
-  throw new Error(`Mock ticket ${ticketId}.md not found in active directory`);
+  const activeFiles = fs.readdirSync(ACTIVE_DIR).filter(f => f.endsWith('.md'));
+  if (activeFiles.length > 0) {
+    ticketId = path.basename(activeFiles[0], '.md');
+    testTicketPath = path.join(ACTIVE_DIR, activeFiles[0]);
+  } else {
+    throw new Error(`No active ticket found in ${ACTIVE_DIR} to run mock validations.`);
+  }
 }
 
 // Generate the skill blueprint using our logic

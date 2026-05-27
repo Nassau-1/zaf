@@ -64,6 +64,7 @@ const PRIORITY_COLORS = {
 
 let STATE = {
   data: null,
+  config: null,
   currentView: 'overview',
   selectedRepo: '',          // '' = All; 'zo' | 'zo-agentic-framework' | ...
   filters: { search: '', workstream: '', phase: '', team: '', priority: '', status: '' },
@@ -102,6 +103,15 @@ async function loadData() {
     const resp = await fetch(DATA_URL + '?t=' + Date.now());
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     STATE.data = await resp.json();
+ 
+    try {
+      const configResp = await fetch('/api/config?t=' + Date.now());
+      if (configResp.ok) {
+        STATE.config = await configResp.json();
+      }
+    } catch (e) {
+      console.warn("Failed to load ZAF configs", e);
+    }
 
     // Build ticket map (active + archived)
     STATE.ticketMap = {};
@@ -283,6 +293,7 @@ function navigateTo(view, skipHash = false) {
     board:     'Ticket Board',
     graph:     'Dependency Graph',
     archive:   'Archive',
+    control:   'Control Center',
   };
   document.getElementById('topbar-view-label').textContent = labels[view] || view;
 
@@ -317,6 +328,7 @@ function renderView(view) {
     case 'board':     renderBoard(content);     break;
     case 'graph':     renderGraph(content);     break;
     case 'archive':   renderArchive(content);   break;
+    case 'control':   renderControl(content);   break;
     default:          renderOverview(content);
   }
 }
@@ -1234,12 +1246,19 @@ function bindRunAgentButton() {
 
 function triggerAgentRun(ticketId, role, harness) {
   openConsoleDrawer();
+  
+  const agentCfg = (STATE.config && STATE.config.agents && STATE.config.agents[role]) || {};
+  const model = agentCfg.model || '';
+  const reasoning = agentCfg.reasoning || '';
+  const heartbeat = agentCfg.heartbeat || '';
+
   appendConsoleLog(`\n[ZAF Control] Spawning sovereign subshell for ${ticketId} [Role: ${role}, Harness: ${harness}]...`, 'system');
+  if (model) appendConsoleLog(`[ZAF Control] Target Model: ${model} | Reasoning: ${reasoning} | Heartbeat: ${heartbeat}s`, 'system');
   
   // Detect Tauri or fallback to HTTP REST path
   if (typeof window !== 'undefined' && window.__TAURI__ !== undefined) {
     appendConsoleLog(`[ZAF Control] Tauri native environment detected. Invoking IPC run-hook...`, 'system');
-    window.__TAURI__.core.invoke('spawn_agent_run', { ticketId, role, harness })
+    window.__TAURI__.core.invoke('spawn_agent_run', { ticketId, role, harness, model, reasoning, heartbeat })
       .then(() => {
         appendConsoleLog(`[ZAF Control] Tauri agent run request sent successfully.`, 'system');
       })
@@ -1248,7 +1267,7 @@ function triggerAgentRun(ticketId, role, harness) {
       });
   } else {
     appendConsoleLog(`[ZAF Control] Web browser detected. Dispatching API telemetry trigger...`, 'system');
-    fetch(`/api/run?ticket=${ticketId}&role=${role}&harness=${harness}`)
+    fetch(`/api/run?ticket=${ticketId}&role=${role}&harness=${harness}&model=${model}&reasoning=${reasoning}&heartbeat=${heartbeat}`)
       .then(res => res.json())
       .then(data => {
         appendConsoleLog(`[ZAF Control] Telemetry server response: ${JSON.stringify(data)}`, 'system');
@@ -1288,7 +1307,18 @@ function appendConsoleLog(text, type = 'stdout') {
   if (!content) return;
   
   const line = document.createElement('div');
-  line.className = `console-line ${type}`;
+  let traceType = type;
+  
+  // Detect Paperclip-style traceability headers in logs
+  if (text.includes('[TOOL CALL]') || text.includes('🛠️') || text.includes('Executing tool') || text.includes('executing tool') || text.includes('call_tool')) {
+    traceType = 'tool-call';
+  } else if (text.includes('[API REQUEST]') || text.includes('🌐') || text.includes('fetch') || text.includes('HTTP request')) {
+    traceType = 'api-request';
+  } else if (text.includes('[DECISION]') || text.includes('🧠') || text.includes('Decision') || text.includes('planning') || text.includes('goal')) {
+    traceType = 'decision';
+  }
+  
+  line.className = `console-line ${traceType}`;
   line.textContent = `> ${text}`;
   content.appendChild(line);
   content.scrollTop = content.scrollHeight;
@@ -1300,6 +1330,380 @@ function registerTauriListeners() {
     window.__TAURI__.event.listen('agent-log', (event) => {
       openConsoleDrawer();
       appendConsoleLog(event.payload, 'stdout');
+    });
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PHASE 5: INTERACTIVE CONTROL CENTER (TICKET & ORG BUILDER)
+   ═══════════════════════════════════════════════════════════════ */
+
+let activeControlTab = 'ticket';
+
+function renderControl(container) {
+  if (!STATE.config) {
+    container.innerHTML = `
+      <div style="padding: 40px; text-align: center; color: var(--text-secondary)">
+        <div class="spinner" style="margin: 0 auto 16px"></div>
+        <div>Loading ZAF configurations...</div>
+      </div>`;
+    fetch('/api/config')
+      .then(res => res.json())
+      .then(conf => {
+        STATE.config = conf;
+        renderControl(container);
+      })
+      .catch(err => {
+        container.innerHTML = `<div style="padding:40px;color:#ef4444">Failed to load ZAF configurations: ${err.message}</div>`;
+      });
+    return;
+  }
+
+  const tabs = [
+    { id: 'ticket', label: 'Ticket Builder', icon: '🎫' },
+    { id: 'agents', label: 'Agent & Org Builder', icon: '👥' },
+    { id: 'usage', label: 'Subscription & Usage', icon: '📊' }
+  ];
+
+  const tabsHtml = tabs.map(t => `
+    <button class="console-btn control-tab-btn ${activeControlTab === t.id ? 'active' : ''}" data-tab="${t.id}" style="padding: 6px 16px; font-size: 12px; font-weight: 600; display:flex; align-items:center; gap:6px;">
+      <span>${t.icon}</span> ${t.label}
+    </button>
+  `).join('');
+
+  let panelHtml = '';
+
+  if (activeControlTab === 'ticket') {
+    panelHtml = `
+      <div class="fade-in" style="max-width: 650px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-card);">
+        <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">🎫 Construct New Ticket Context</h2>
+        <form id="zaf-ticket-form" style="display:flex; flex-direction:column; gap:16px;">
+          <div class="meta-field">
+            <label class="meta-label">Ticket Title</label>
+            <input type="text" id="tkt-title" required placeholder="e.g. Implement security headers" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; transition: border var(--t-fast);" />
+          </div>
+          
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+            <div class="meta-field">
+              <label class="meta-label">Phase Gate</label>
+              <select id="tkt-phase" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
+                <option value="P1">Phase 1 — Setup & Parser</option>
+                <option value="P2">Phase 2 — UI Core</option>
+                <option value="P3">Phase 3 — CLI Integration</option>
+                <option value="P4" selected>Phase 4 — Unified Control</option>
+              </select>
+            </div>
+            
+            <div class="meta-field">
+              <label class="meta-label">Workstream</label>
+              <select id="tkt-workstream" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
+                <option value="WS-CLI">WS-CLI — CLI harness</option>
+                <option value="WS-DASHBOARD">WS-DASHBOARD — Dashboard core</option>
+                <option value="WS-UX" selected>WS-UX — Premium styling</option>
+                <option value="WS-DOCS">WS-DOCS — Specifications</option>
+                <option value="none">none</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
+            <div class="meta-field">
+              <label class="meta-label">Priority</label>
+              <select id="tkt-priority" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
+                <option value="P0">P0 — CRITICAL Block</option>
+                <option value="P1">P1 — High Priority</option>
+                <option value="P2" selected>P2 — Normal</option>
+                <option value="P3">P3 — Low</option>
+              </select>
+            </div>
+            
+            <div class="meta-field">
+              <label class="meta-label">Assigned Agent Tier</label>
+              <select id="tkt-role" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
+                <option value="engineering" selected>Engineering Core</option>
+                <option value="testing">Quality & Testing</option>
+                <option value="coo">Chief Operating Officer</option>
+                <option value="data">Data & AI Specialist</option>
+                <option value="security">Security Specialist</option>
+                <option value="sre">Site Reliability Engineer</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="meta-field">
+            <label class="meta-label">Target Repo Context</label>
+            <select id="tkt-repo" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none;">
+              <option value="zo-agentic-framework" selected>zo-agentic-framework</option>
+              <option value="zo">zo</option>
+            </select>
+          </div>
+
+          <div class="meta-field">
+            <label class="meta-label">Task Context & Description</label>
+            <textarea id="tkt-description" rows="5" required placeholder="Describe the goal, background context, and requirements for the agent harness to execute..." style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; resize: vertical; transition: border var(--t-fast);"></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+            <span>📁</span> Create Ticket & Auto-Index
+          </button>
+        </form>
+      </div>`;
+  } else if (activeControlTab === 'agents') {
+    const agentKeys = Object.keys(STATE.config.agents);
+    const selectedAgentKey = STATE.selectedAgentKey || agentKeys[0];
+    const agent = STATE.config.agents[selectedAgentKey];
+
+    const agentOptions = agentKeys.map(k => `
+      <option value="${k}" ${selectedAgentKey === k ? 'selected' : ''}>${STATE.config.agents[k].roleName} (${k})</option>
+    `).join('');
+
+    const modelOptions = [
+      { id: 'frontier', label: 'Frontier (Claude 3.7 Sonnet / GPT-4.5)' },
+      { id: 'normal', label: 'Normal (Claude 3.5 Haiku / GPT-4o-mini)' },
+      { id: 'reasoning', label: 'Reasoning (DeepSeek R1 / o3-mini)' }
+    ].map(m => `
+      <option value="${m.id}" ${agent.model === m.id ? 'selected' : ''}>${m.label}</option>
+    `).join('');
+
+    const reasoningLevels = ['high', 'medium', 'low', 'unavailable'].map(l => `
+      <option value="${l}" ${agent.reasoning === l ? 'selected' : ''}>${l.toUpperCase()}</option>
+    `).join('');
+
+    const toolsList = ['FileSystem', 'ShellSubprocess', 'SecurityAudit', 'DBMigrator'].map(t => {
+      const active = agent.tools.includes(t);
+      return `
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-secondary); cursor:pointer;">
+          <input type="checkbox" class="agent-tool-cb" value="${t}" ${active ? 'checked' : ''} style="accent-color:var(--indigo-400);" />
+          <span>${t}</span>
+        </label>
+      `;
+    }).join('');
+
+    const teamCards = STATE.config.org.teams.map(t => {
+      const memberChips = t.members.map(m => {
+        const name = STATE.config.agents[m]?.roleName || m;
+        return `<span class="tag tag-repo" style="font-size:10px; margin:2px;">${name}</span>`;
+      }).join('');
+      return `
+        <div class="ws-deep-card" style="margin-bottom:12px; background: rgba(20,23,32,0.4);">
+          <div style="font-weight:600; color:var(--text-primary); font-size:12px; margin-bottom:6px; display:flex; align-items:center; gap:6px;">
+            <span style="color:var(--indigo-400);">⊞</span> ${t.name}
+          </div>
+          <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+            Parent: ${t.parent ? STATE.config.org.teams.find(x => x.id === t.parent)?.name : 'None'}
+          </div>
+          <div style="display:flex; flex-wrap:wrap;">${memberChips}</div>
+        </div>
+      `;
+    }).join('');
+
+    panelHtml = `
+      <div class="fade-in" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items: start;">
+        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">👥 Agent Personality & Limits</h2>
+          <div class="meta-field" style="margin-bottom: 16px;">
+            <label class="meta-label">Select Agent Profile</label>
+            <select id="agent-selector" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+              ${agentOptions}
+            </select>
+          </div>
+
+          <form id="zaf-agent-form" style="display:flex; flex-direction:column; gap:16px;">
+            <div class="meta-field">
+              <label class="meta-label">Assigned Model Target</label>
+              <select id="agent-model" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                ${modelOptions}
+              </select>
+            </div>
+
+            <div class="meta-field">
+              <label class="meta-label">Reasoning Level</label>
+              <select id="agent-reasoning" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
+                ${reasoningLevels}
+              </select>
+            </div>
+
+            <div class="meta-field">
+              <label class="meta-label" style="display:flex; justify-content:space-between;">
+                <span>Heartbeat Interval Speed</span>
+                <span id="heartbeat-val" style="color:var(--indigo-400); font-family:monospace;">${agent.heartbeat}s</span>
+              </label>
+              <div style="display:flex; align-items:center; gap:12px;">
+                <input type="range" id="agent-heartbeat" min="10" max="120" value="${agent.heartbeat}" style="flex:1; accent-color:var(--indigo-400);" />
+              </div>
+            </div>
+
+            <div class="meta-field">
+              <label class="meta-label">Authorized Tools Roster</label>
+              <div style="display:flex; flex-direction:column; gap:8px; background:var(--bg-input); border:1px solid var(--border-medium); padding:10px 14px; border-radius:var(--radius-sm);">
+                ${toolsList}
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
+              <span>💾</span> Save Personality & Limits
+            </button>
+          </form>
+        </div>
+
+        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">🔀 Organization Chart & Teams</h2>
+          <div style="display:flex; flex-direction:column;">
+            ${teamCards}
+          </div>
+        </div>
+      </div>`;
+  } else if (activeControlTab === 'usage') {
+    const limit = STATE.config.subscriptions.weeklyLimitHours;
+    const used = STATE.config.subscriptions.weeklyUsedHours;
+    const pct = ((used / limit) * 100).toFixed(0);
+
+    const projectRows = STATE.config.analytics.projects.map(p => `
+      <tr>
+        <td style="font-family:monospace; font-size:11px; color:var(--text-secondary); padding:8px 0;">${p.id}</td>
+        <td style="font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--amber-400); text-align:right; padding:8px 0;">${p.tokensConsumed.toLocaleString()}</td>
+      </tr>
+    `).join('');
+
+    panelHtml = `
+      <div class="fade-in" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px;">
+        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; text-align:center; display:flex; flex-direction:column; align-items:center;">
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; width:100%; text-align:left;">📊 Weekly Usage Quota</h2>
+          
+          <div style="position:relative; width:180px; height:180px; display:flex; align-items:center; justify-content:center; margin-bottom:20px;">
+            <svg width="180" height="180" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="40" stroke="var(--border-medium)" stroke-width="6" fill="transparent" />
+              <circle cx="50" cy="50" r="40" stroke="var(--indigo-500)" stroke-width="6" fill="transparent" 
+                      stroke-dasharray="${2 * Math.PI * 40}" stroke-dashoffset="${2 * Math.PI * 40 * (1 - used / limit)}" stroke-linecap="round"
+                      transform="rotate(-90 50 50)" style="filter: drop-shadow(0 0 4px rgba(99,102,241,0.4))" />
+            </svg>
+            <div style="position:absolute; text-align:center;">
+              <div style="font-size:24px; font-weight:700; color:var(--text-primary); font-family:'JetBrains Mono', monospace;">${pct}%</div>
+              <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Used</div>
+            </div>
+          </div>
+
+          <div style="font-size:12px; color:var(--text-secondary); line-height:1.6; max-width:280px; text-align:center;">
+            Running under Move Capital Developer Suite. You have consumed <strong style="color:var(--text-primary); font-family:monospace;">${used} hours</strong> out of your <strong style="color:var(--text-primary); font-family:monospace;">${limit} hours</strong> weekly budget.
+          </div>
+        </div>
+
+        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
+          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">🪙 Token Consumption per Project</h2>
+          <table style="width:100%; border-collapse:collapse; margin-top:8px;">
+            <thead>
+              <tr style="border-bottom:1px solid var(--border-subtle);">
+                <th style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:600; padding:8px 0; text-align:left;">Project / Repo</th>
+                <th style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:600; padding:8px 0; text-align:right;">Tokens Consumed</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${projectRows}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+
+  container.innerHTML = `
+    <div class="view-deep-dive fade-in" style="padding: 24px; max-width: 1100px;">
+      <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
+        <h1 style="font-size:20px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px; margin: 0;">
+          <span>⚙️</span> ZAF Sovereign Control Center
+        </h1>
+        <div style="display:flex; gap:8px; background:var(--bg-panel); border:1px solid var(--border-subtle); padding:4px; border-radius:var(--radius-md);">
+          ${tabsHtml}
+        </div>
+      </div>
+
+      <div id="control-active-panel">
+        ${panelHtml}
+      </div>
+    </div>`;
+
+  container.querySelectorAll('.control-tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeControlTab = btn.dataset.tab;
+      renderControl(container);
+    });
+  });
+
+  const ticketForm = container.querySelector('#zaf-ticket-form');
+  if (ticketForm) {
+    ticketForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = document.getElementById('tkt-title').value;
+      const description = document.getElementById('tkt-description').value;
+      const phase = document.getElementById('tkt-phase').value;
+      const workstream = document.getElementById('tkt-workstream').value;
+      const priority = document.getElementById('tkt-priority').value;
+      const role = document.getElementById('tkt-role').value;
+      const repo = document.getElementById('tkt-repo').value;
+
+      try {
+        const res = await fetch('/api/ticket/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, description, phase, workstream, priority, role, repo })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        alert(`🟢 Successfully created ticket: ${data.ticketId}`);
+        await loadData();
+        navigateTo('board');
+      } catch (err) {
+        alert(`❌ Failed creating ticket: ${err.message}`);
+      }
+    });
+  }
+
+  const agentSelector = container.querySelector('#agent-selector');
+  if (agentSelector) {
+    agentSelector.addEventListener('change', () => {
+      STATE.selectedAgentKey = agentSelector.value;
+      renderControl(container);
+    });
+  }
+
+  const heartbeatSlider = container.querySelector('#agent-heartbeat');
+  if (heartbeatSlider) {
+    heartbeatSlider.addEventListener('input', () => {
+      const displayVal = container.querySelector('#heartbeat-val');
+      if (displayVal) displayVal.textContent = heartbeatSlider.value + 's';
+    });
+  }
+
+  const agentForm = container.querySelector('#zaf-agent-form');
+  if (agentForm) {
+    agentForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const selectKey = agentSelector.value;
+      const model = document.getElementById('agent-model').value;
+      const reasoning = document.getElementById('agent-reasoning').value;
+      const heartbeat = parseInt(heartbeatSlider.value, 10);
+      
+      const tools = [];
+      container.querySelectorAll('.agent-tool-cb:checked').forEach(cb => {
+        tools.push(cb.value);
+      });
+
+      STATE.config.agents[selectKey].model = model;
+      STATE.config.agents[selectKey].reasoning = reasoning;
+      STATE.config.agents[selectKey].heartbeat = heartbeat;
+      STATE.config.agents[selectKey].tools = tools;
+
+      try {
+        const res = await fetch('/api/config/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(STATE.config)
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        alert(`🟢 Custom agent configurations successfully persisted!`);
+        renderControl(container);
+      } catch (err) {
+        alert(`❌ Failed persisting configs: ${err.message}`);
+      }
     });
   }
 }

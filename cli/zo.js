@@ -350,7 +350,7 @@ Task context and descriptive background information goes here.
 
 // ─── Command: Run ──────────────────────────────────────────────────────────────
 
-function handleRun(role, ticketId, harnessOption) {
+function handleRun(role, ticketId, harnessOption, model, reasoning, heartbeat) {
   if (!role || !ticketId) {
     console.error('❌ Error: Usage: zo run <role> --ticket <TKT-ID> [--harness <name>]');
     process.exit(1);
@@ -381,6 +381,9 @@ function handleRun(role, ticketId, harnessOption) {
   console.log(`🎭 Assigned Role: ${role}`);
   console.log(`🛡️ Harness Tech:  ${harness}`);
   console.log(`📂 Repository:    ${repoName}`);
+  if (model) console.log(`🪙 Target Model:  ${model}`);
+  if (reasoning) console.log(`🧠 Reasoning Lvl: ${reasoning}`);
+  if (heartbeat) console.log(`💓 Heartbeat:     ${heartbeat}s`);
   console.log(`======================================================\n`);
 
   // 1. Compile Transient Skill Harness (.zaf-skill.md)
@@ -397,6 +400,9 @@ function handleRun(role, ticketId, harnessOption) {
 *   **Assigned Role Profile**: ${role}
 *   **Ticket Title**: ${data.title || 'N/A'}
 *   **Last Handoff Summary**: ${lastHandoff}
+*   **Assigned Model**: ${model || 'default'}
+*   **Reasoning Level**: ${reasoning || 'default'}
+*   **Heartbeat Interval**: ${heartbeat || '40'}s
 
 ## 2. Dynamic Agent Persona & Boundaries
 ${roleProfile}
@@ -563,7 +569,16 @@ if (command === 'ticket') {
   const harnessIdx = args.indexOf('--harness');
   const harness = harnessIdx !== -1 ? args[harnessIdx + 1] : 'claude';
 
-  handleRun(role, ticketId, harness);
+  const modelIdx = args.indexOf('--model');
+  const model = modelIdx !== -1 ? args[modelIdx + 1] : '';
+
+  const reasoningIdx = args.indexOf('--reasoning');
+  const reasoning = reasoningIdx !== -1 ? args[reasoningIdx + 1] : '';
+
+  const heartbeatIdx = args.indexOf('--heartbeat');
+  const heartbeat = heartbeatIdx !== -1 ? args[heartbeatIdx + 1] : '';
+
+  handleRun(role, ticketId, harness, model, reasoning, heartbeat);
 } else {
   console.error(`❌ Error: Unknown command: "${command}". Run "zo" for help.`);
   process.exit(1);
