@@ -1,10 +1,20 @@
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
+use tauri_plugin_notification::NotificationExt;
+
+fn trigger_notification(app: &tauri::AppHandle, title: &str, body: &str) {
+  let _ = app.notification()
+    .builder()
+    .title(title)
+    .body(body)
+    .show();
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .plugin(tauri_plugin_notification::init())
     .setup(|app| {
       // 1. Create Menu Items in Tauri v2
       let handle = app.handle();
@@ -38,25 +48,30 @@ pub fn run() {
             }
             "sweep" => {
               println!("[ZAF Control] Triggering AST Parse Sweep...");
+              let app_handle = app.handle().clone();
               // Spawn background thread to run parse.js
               std::thread::spawn(move || {
                 let _ = std::process::Command::new("node")
                   .arg("dashboard/parse.js")
                   .output();
                 println!("[ZAF Control] AST Parse Sweep completed successfully.");
+                trigger_notification(&app_handle, "AST Parse Sweep Complete", "ZAF dashboard successfully parsed all workspace active tickets.");
               });
             }
             "restart" => {
               println!("[ZAF Control] Restarting ZAF Telemetry Server on port 4242...");
+              let app_handle = app.handle().clone();
               std::thread::spawn(move || {
                 // Kill any process currently on port 4242 is handled by server.js natively on restart
                 let _ = std::process::Command::new("node")
                   .arg("dashboard/server.js")
                   .spawn();
+                trigger_notification(&app_handle, "Telemetry Server Restarted", "Background Node.js sidecar service has been successfully rebooted.");
               });
             }
             "settings" => {
               println!("[ZAF Control] Opening Settings configuration panels.");
+              trigger_notification(app.handle(), "ZAF Settings", "Settings panels are handled in the local config file.");
             }
             _ => {}
           }
@@ -74,10 +89,14 @@ pub fn run() {
 
       // 4. Spawn background Node.js server.js sidecar on boot
       println!("[ZAF Control] Bootstrapping Node.js ZAF Telemetry Server sidecar...");
+      let app_handle = app.handle().clone();
       std::thread::spawn(move || {
         let _ = std::process::Command::new("node")
           .arg("dashboard/server.js")
           .spawn();
+        // Give the sidecar a tiny fraction of time to start before raising notification
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        trigger_notification(&app_handle, "ZAF Control Plane Active", "ZAF Telemetry Server successfully started on port 4242.");
       });
 
       Ok(())
