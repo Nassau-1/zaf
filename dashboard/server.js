@@ -207,7 +207,10 @@ const server = http.createServer((req, res) => {
 
   // ── Data endpoint ─────────────────────────────────────────────────────────
   if (pathname === '/api/data') {
-    runParse();
+    // ⚡ Bolt Optimization: Removed synchronous runParse() call
+    // Previously, execSync was blocking the event loop on every data request.
+    // The filesystem watcher (chokidar) already handles running the parser
+    // asynchronously when markdown files change.
     try {
       const data = fs.readFileSync(DATA_FILE, 'utf8');
       res.writeHead(200, { 'Content-Type': 'application/json' });
