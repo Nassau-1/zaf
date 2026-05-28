@@ -1,119 +1,130 @@
 /**
- * app.js — ZO WIP Dashboard v2
- * Ports v1 with three upgrades:
- *   1. Multi-repo: repo selector filters all views
- *   2. SSE auto-refresh: EventSource('/api/watch') → re-fetch + re-render on file change
- *   3. Draggable graph: individual node drag + pin; background pans; scroll zooms
+ * app.js — ZAF Control Plane (Paperclip-grade)
+ *
+ *   - Multi-repo unified overview (kanban gauges + analyst load)
+ *   - Drag-and-drop SVG Org/Team Builder (supervisor edges, role personas)
+ *   - Multi-console terminal panel (per-process tabs, live SSE streaming)
+ *   - Immutable audit log view
+ *   - Dynamic CLI provider discovery (--help parsing)
+ *   - Real heartbeat units and telemetry-backed quotas
  */
 
-/* ═══════════════════════════════════════════════════════════════
-   CONFIG
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// CONFIG
+// =========================================================================
 
 const DATA_URL  = '/api/data';
 const WATCH_URL = '/api/watch';
 
-const STATUS_ORDER = ['IN_PROGRESS', 'BLOCKED', 'IN_REVIEW', 'WAITING_INPUT', 'OPEN', 'DONE'];
-
+const STATUS_ORDER = ['IN_PROGRESS','BLOCKED','IN_REVIEW','WAITING_INPUT','OPEN','DONE'];
 const STATUS_LABELS = {
-  OPEN: 'Open',
-  IN_PROGRESS: 'In Progress',
-  WAITING_INPUT: 'Waiting Input',
-  BLOCKED: 'Blocked',
-  IN_REVIEW: 'In Review',
-  DONE: 'Done',
-  DONE_WITH_ERRORS: 'Done w/ Errors',
+  OPEN: 'Open', IN_PROGRESS: 'In Progress', WAITING_INPUT: 'Waiting',
+  BLOCKED: 'Blocked', IN_REVIEW: 'Review', DONE: 'Done',
+  DONE_WITH_ERRORS: 'Done w/ Err',
 };
-
-const WS_COLORS = {
-  'WS-UX':           '#f472b6',
-  'WS-SHELL':        '#818cf8',
-  'WS-DATA':         '#34d399',
-  'WS-SERVICES':     '#60a5fa',
-  'WS-CRM':          '#fb923c',
-  'WS-INTELLIGENCE': '#a78bfa',
-  'WS-REPOS':        '#94a3b8',
-  'WS-ASSISTANT':    '#2dd4bf',
-  'WS-INFRA':        '#fbbf24',
-  'WS-DASHBOARD':    '#38bdf8',
-  'WS-DOCS':         '#f0abfc',
-  'WS-CLI':          '#86efac',
-  'none':            '#64748b',
-};
-
 const STATUS_COLORS = {
-  OPEN: '#3b82f6',
-  IN_PROGRESS: '#6366f1',
-  WAITING_INPUT: '#f59e0b',
-  BLOCKED: '#ef4444',
-  IN_REVIEW: '#a855f7',
-  DONE: '#22c55e',
+  OPEN: '#3b82f6', IN_PROGRESS: '#6366f1', WAITING_INPUT: '#f59e0b',
+  BLOCKED: '#ef4444', IN_REVIEW: '#a855f7', DONE: '#22c55e',
   DONE_WITH_ERRORS: '#f97316',
 };
-
-const PRIORITY_COLORS = {
-  P0: '#ef4444',
-  P1: '#f97316',
-  P2: '#eab308',
-  P3: '#64748b',
+const PRIORITY_COLORS = { P0:'#ef4444', P1:'#f97316', P2:'#eab308', P3:'#64748b' };
+const WS_COLORS = {
+  'WS-UX':'#f472b6','WS-SHELL':'#818cf8','WS-DATA':'#34d399','WS-SERVICES':'#60a5fa',
+  'WS-CRM':'#fb923c','WS-INTELLIGENCE':'#a78bfa','WS-REPOS':'#94a3b8','WS-ASSISTANT':'#2dd4bf',
+  'WS-INFRA':'#fbbf24','WS-DASHBOARD':'#38bdf8','WS-DOCS':'#f0abfc','WS-CLI':'#86efac','none':'#64748b',
+};
+const STRUCTURAL_PERSONAS = {
+  thinker: {
+    icon: 'PLAN', label: 'Thinker (Planner)',
+    persona: 'You are a planning specialist. Decompose objectives, write step-by-step plans, identify risks, never write code unless a subordinate worker is unavailable. Optimise for clarity, sequencing, and dependency mapping.',
+    bounds: 'Read-only on workspace files. May propose, never directly write code. Must annotate decisions with rationale.',
+  },
+  reviewer: {
+    icon: 'AUDIT', label: 'Reviewer (Auditor)',
+    persona: 'You are a code & quality auditor. Read changes, identify defects, security issues, performance regressions, and policy violations. Refuse to write production code; instead, recommend.',
+    bounds: 'Read-only on workspace. May write into review logs and audit artefacts only.',
+  },
+  worker: {
+    icon: 'BUILD', label: 'Worker (Compiler)',
+    persona: 'You are the standard executor. Take a scoped ticket, implement the change, run tests, commit work. Be terse, follow the plan, do not refactor beyond scope.',
+    bounds: 'Read/write on workspace files within the assigned ticket scope. May run build/test commands. May not change CI or merge.',
+  },
 };
 
-/* ═══════════════════════════════════════════════════════════════
-   STATE
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// STATE
+// =========================================================================
 
-let STATE = {
+const STATE = {
   data: null,
   config: null,
   currentView: 'overview',
-  selectedRepo: '',          // '' = All; 'zo' | 'zo-agentic-framework' | ...
-  filters: { search: '', workstream: '', phase: '', team: '', priority: '', status: '' },
+  selectedRepo: '',
+  filters: { search:'', workstream:'', phase:'', team:'', priority:'', status:'' },
   selectedTicketId: null,
-  ticketMap: {},             // id → ticket (active + archived combined)
-  graphPan: { x: 0, y: 0, zoom: 1 },
-  archiveSort: { col: 'id', dir: 'asc' },
+  ticketMap: {},
+  graphPan: { x:0, y:0, zoom:1 },
+  archiveSort: { col:'id', dir:'asc' },
+  // Phase 5 — Paperclip additions
+  processes: new Map(),      // processId -> { meta, lines:[] }
+  terminals: new Map(),      // processId -> Terminal instance (xterm.js)
+  terminalLastTs: new Map(), // processId -> highest ts written to terminal (dedup)
+  prefireCountdowns: new Map(), // processId -> intervalId
+  activeProcessTab: null,
+  consoleOpen: false,
+  audit: [],
+  cliDiscoveryCache: {},
+  selectedAgentKey: null,
+  selectedOrgTeamId: null,
+  selectedOrgAgentKey: null,
+  controlTab: 'ticket',
+  fleetProcessIds: new Set(),     // processIds dispatched via fleet
+  fleetSelectedTickets: new Set(),// ticketIds selected in fleet multi-picker
+  // CLI Hub (TKT-ZAF-0019)
+  cliHubProcesses: new Map(),  // processId -> { harnessId, kind: 'install'|'connect' }
+  cliHubStatus: {},            // harnessId -> { installed, version }
+  cliHubConnected: {},         // harnessId -> connected-at timestamp string
 };
 
-/* ═══════════════════════════════════════════════════════════════
-   INIT
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// INIT
+// =========================================================================
 
 async function init() {
   bindNav();
   bindDetailClose();
   bindRefresh();
+  bindConsolePanel();
+  bindTopbarConsoleToggle();
+  initConsoleResize();
+  bindNewRepoButton();
   await loadData();
   bindRepoSelector();
+  await loadAudit();
+  await loadProcesses();
   routeFromHash();
   window.addEventListener('hashchange', routeFromHash);
   connectSSE();
-  
-  // Phase 4 bindings
-  bindRunAgentButton();
-  bindConsoleControls();
   registerTauriListeners();
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   DATA LOADING
-   ═══════════════════════════════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', init);
+
+// =========================================================================
+// DATA
+// =========================================================================
 
 async function loadData() {
   try {
-    const resp = await fetch(DATA_URL + '?t=' + Date.now());
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    STATE.data = await resp.json();
- 
-    try {
-      const configResp = await fetch('/api/config?t=' + Date.now());
-      if (configResp.ok) {
-        STATE.config = await configResp.json();
-      }
-    } catch (e) {
-      console.warn("Failed to load ZAF configs", e);
-    }
+    const r = await fetch(DATA_URL + '?t=' + Date.now());
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    STATE.data = await r.json();
 
-    // Build ticket map (active + archived)
+    try {
+      const cr = await fetch('/api/config?t=' + Date.now());
+      if (cr.ok) STATE.config = await cr.json();
+    } catch {}
+
     STATE.ticketMap = {};
     for (const t of STATE.data.tickets.active)   STATE.ticketMap[t.id] = t;
     for (const t of STATE.data.tickets.archived) STATE.ticketMap[t.id] = t;
@@ -128,14 +139,40 @@ async function loadData() {
   }
 }
 
+async function loadAudit() {
+  try {
+    const r = await fetch('/api/audit?limit=500');
+    if (!r.ok) return;
+    const data = await r.json();
+    STATE.audit = data.entries || [];
+    document.getElementById('runtime-audit').textContent = STATE.audit.length;
+    document.getElementById('badge-audit').textContent   = STATE.audit.length;
+  } catch {}
+}
+
+async function loadProcesses() {
+  try {
+    const r = await fetch('/api/processes');
+    if (!r.ok) return;
+    const data = await r.json();
+    for (const meta of data.processes) {
+      if (!STATE.processes.has(meta.processId)) {
+        STATE.processes.set(meta.processId, { meta, lines: [] });
+      }
+    }
+    renderConsoleTabs();
+    updateShellCounter();
+  } catch {}
+}
+
 function updateSidebarStats() {
   const tickets = getActiveTickets();
   const s = {};
   for (const t of tickets) s[t.status] = (s[t.status] || 0) + 1;
-  document.getElementById('stat-blocked').textContent   = s.BLOCKED || 0;
-  document.getElementById('stat-inprogress').textContent = s.IN_PROGRESS || 0;
-  document.getElementById('stat-waiting').textContent   = s.WAITING_INPUT || 0;
-  document.getElementById('stat-open').textContent      = s.OPEN || 0;
+  document.getElementById('stat-blocked').textContent    = s.BLOCKED       || 0;
+  document.getElementById('stat-inprogress').textContent = s.IN_PROGRESS   || 0;
+  document.getElementById('stat-waiting').textContent    = s.WAITING_INPUT || 0;
+  document.getElementById('stat-open').textContent       = s.OPEN          || 0;
 }
 
 function updateBadges() {
@@ -146,31 +183,28 @@ function updateBadges() {
 function updateTimestamp() {
   const ts = new Date(STATE.data.generated);
   document.getElementById('sidebar-timestamp').textContent =
-    'Parsed: ' + ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    'Parsed: ' + ts.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 }
 
-function hideLoading() {
-  document.getElementById('loading-screen')?.remove();
-}
+function hideLoading() { document.getElementById('loading-screen')?.remove(); }
 
 function showError(err) {
-  const content = document.getElementById('content');
-  content.innerHTML = `
+  document.getElementById('content').innerHTML = `
     <div class="error-card fade-in">
       <h2>⚠ Could not load data</h2>
-      <p>Make sure the server is running and the parser has run:</p>
-      <code>cd zo-agentic-framework/dashboard<br>npm install<br>node server.js<br><br>Then open http://localhost:4242</code>
+      <p>Make sure the server is running:</p>
+      <code>cd dashboard && node server.js</code>
+      <p style="margin-top:8px;font-size:11px;color:var(--text-muted)">${err.message}</p>
     </div>`;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   REPO SELECTOR (new in v2)
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// REPO SELECTOR
+// =========================================================================
 
 function populateRepoSelector() {
   const sel = document.getElementById('repo-select');
   if (!sel || !STATE.data?.repos) return;
-  // Preserve selection if valid
   const cur = STATE.selectedRepo;
   sel.innerHTML = '<option value="">All Repos</option>';
   for (const r of STATE.data.repos) {
@@ -187,70 +221,108 @@ function bindRepoSelector() {
   if (!sel) return;
   sel.addEventListener('change', () => {
     STATE.selectedRepo = sel.value;
-    // Reset filters that may not exist in new repo
-    STATE.filters = { search: '', workstream: '', phase: '', team: '', priority: '', status: '' };
+    STATE.filters = { search:'', workstream:'', phase:'', team:'', priority:'', status:'' };
     updateSidebarStats();
     updateBadges();
     renderView(STATE.currentView);
   });
 }
 
-/* Returns active tickets filtered by selected repo */
 function getActiveTickets() {
   if (!STATE.data) return [];
   const all = STATE.data.tickets.active;
   return STATE.selectedRepo ? all.filter(t => t.repoId === STATE.selectedRepo) : all;
 }
-
 function getArchivedTickets() {
   if (!STATE.data) return [];
   const all = STATE.data.tickets.archived;
   return STATE.selectedRepo ? all.filter(t => t.repoId === STATE.selectedRepo) : all;
 }
-
 function getProgrammes() {
   if (!STATE.data) return [];
   const all = STATE.data.programmes || [];
   return STATE.selectedRepo ? all.filter(p => p.repoId === STATE.selectedRepo) : all;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   SSE AUTO-REFRESH (new in v2)
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// SSE
+// =========================================================================
 
 let sseSource = null;
 
 function connectSSE() {
   if (sseSource) { sseSource.close(); sseSource = null; }
-
   setSseStatus('connecting');
-
   sseSource = new EventSource(WATCH_URL);
-
-  sseSource.onopen = () => {
-    setSseStatus('connected');
-  };
-
+  sseSource.onopen = () => setSseStatus('connected');
   sseSource.onmessage = async (e) => {
     try {
       const msg = JSON.parse(e.data);
-      if (msg.event === 'reload') {
-        setSseStatus('reloading');
-        await loadData();
-        renderView(STATE.currentView);
-        setSseStatus('connected');
-      } else if (msg.event === 'log') {
-        openConsoleDrawer();
-        appendConsoleLog(msg.log, 'stdout');
+      switch (msg.event) {
+        case 'reload':
+          setSseStatus('reloading');
+          await loadData();
+          if (STATE.currentView === 'audit' || STATE.currentView === 'overview') {
+            await loadAudit();
+          }
+          renderView(STATE.currentView);
+          setSseStatus('connected');
+          break;
+        case 'process.start':
+          onProcessStart(msg.meta);
+          if (msg.meta?.isFleet) {
+            STATE.fleetProcessIds.add(msg.meta.processId);
+            updateFleetBadge();
+            if (STATE.currentView === 'fleet') renderFleet(document.getElementById('content'));
+          }
+          break;
+        case 'process.log':
+          onProcessLog(msg);
+          break;
+        case 'process.pty':
+          onProcessPty(msg.processId, msg.data, msg.ts);
+          break;
+        case 'process.prefire':
+          onProcessPrefire(msg.processId, msg.prefireDeadline);
+          break;
+        case 'process.seeded':
+          onProcessSeeded(msg.processId);
+          break;
+        case 'process.prefire_paused':
+          onProcessPrefirePaused(msg.processId);
+          break;
+        case 'process.limit_hit':
+          if (msg.meta) onProcessEnd(msg.meta);
+          break;
+        case 'process.end':
+          onProcessEnd(msg.meta);
+          if (STATE.currentView === 'fleet') renderFleet(document.getElementById('content'));
+          break;
+        case 'fleet.stop':
+          STATE.fleetProcessIds.clear();
+          updateFleetBadge();
+          if (STATE.currentView === 'fleet') renderFleet(document.getElementById('content'));
+          break;
+        case 'process.cleared':
+          for (const [id, p] of STATE.processes) {
+            if (p.meta.status !== 'running' && p.meta.status !== 'pre-fire') STATE.processes.delete(id);
+          }
+          renderConsoleTabs();
+          updateShellCounter();
+          break;
+        case 'audit':
+          STATE.audit.push(msg.entry);
+          document.getElementById('runtime-audit').textContent = STATE.audit.length;
+          document.getElementById('badge-audit').textContent   = STATE.audit.length;
+          if (STATE.currentView === 'audit') renderView('audit');
+          break;
       }
     } catch {}
   };
-
   sseSource.onerror = () => {
     setSseStatus('disconnected');
     sseSource.close();
     sseSource = null;
-    // Reconnect after 5 s
     setTimeout(connectSSE, 5000);
   };
 }
@@ -259,20 +331,14 @@ function setSseStatus(state) {
   const dot   = document.getElementById('sse-dot');
   const label = document.getElementById('sse-label');
   if (!dot || !label) return;
-
   dot.className = 'sse-dot sse-' + state;
-  const labels = {
-    connecting:   'Connecting…',
-    connected:    'Live',
-    reloading:    'Refreshing…',
-    disconnected: 'Offline',
-  };
+  const labels = { connecting:'Connecting…', connected:'Live', reloading:'Refreshing…', disconnected:'Offline' };
   label.textContent = labels[state] || state;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   ROUTING
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// ROUTING
+// =========================================================================
 
 function routeFromHash() {
   const hash = location.hash.replace('#', '') || 'overview';
@@ -282,94 +348,74 @@ function routeFromHash() {
 function navigateTo(view, skipHash = false) {
   STATE.currentView = view;
   if (!skipHash) location.hash = view;
-
   document.querySelectorAll('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.view === view);
   });
-
   const labels = {
-    overview:  'Programme Overview',
-    programme: 'Programme Deep-Dive',
-    board:     'Ticket Board',
-    graph:     'Dependency Graph',
-    archive:   'Archive',
-    control:   'Control Center',
+    overview:'Programme Overview', programme:'Programme Deep-Dive',
+    board:'Ticket Board', fleet:'Fleet Dispatch', graph:'Dependency Graph', archive:'Archive',
+    control:'Control Center', org:'Org / Team Builder', audit:'Audit Log',
   };
   document.getElementById('topbar-view-label').textContent = labels[view] || view;
-
   if (!STATE.data) return;
-
   closeDetailPanel();
   renderView(view);
 }
 
 function bindNav() {
   document.querySelectorAll('.nav-item[data-view]').forEach(el => {
-    el.addEventListener('click', e => {
-      e.preventDefault();
-      navigateTo(el.dataset.view);
-    });
+    el.addEventListener('click', e => { e.preventDefault(); navigateTo(el.dataset.view); });
   });
 }
-
 function bindRefresh() {
   document.getElementById('btn-refresh').addEventListener('click', async () => {
     await loadData();
+    await loadAudit();
     renderView(STATE.currentView);
   });
 }
 
 function renderView(view) {
-  const content = document.getElementById('content');
-  content.scrollTop = 0;
+  const c = document.getElementById('content');
+  c.scrollTop = 0;
   switch (view) {
-    case 'overview':  renderOverview(content);  break;
-    case 'programme': renderProgramme(content); break;
-    case 'board':     renderBoard(content);     break;
-    case 'graph':     renderGraph(content);     break;
-    case 'archive':   renderArchive(content);   break;
-    case 'control':   renderControl(content);   break;
-    default:          renderOverview(content);
+    case 'overview':  renderOverview(c);  break;
+    case 'programme': renderProgramme(c); break;
+    case 'board':     renderBoard(c);     break;
+    case 'fleet':     renderFleet(c);     break;
+    case 'graph':     renderGraph(c);     break;
+    case 'archive':   renderArchive(c);   break;
+    case 'control':   renderControl(c);   break;
+    case 'org':       renderOrg(c);       break;
+    case 'audit':     renderAudit(c);     break;
+    default:          renderOverview(c);
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   HELPERS
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// HELPERS
+// =========================================================================
 
-function wsColor(ws)       { return WS_COLORS[ws]       || WS_COLORS['none']; }
-function statusColor(s)    { return STATUS_COLORS[s]    || '#64748b'; }
-function priorityColor(p)  { return PRIORITY_COLORS[p]  || '#64748b'; }
+function wsColor(ws)      { return WS_COLORS[ws]      || WS_COLORS['none']; }
+function statusColor(s)   { return STATUS_COLORS[s]   || '#64748b'; }
+function priorityColor(p) { return PRIORITY_COLORS[p] || '#64748b'; }
 
-function statusBadge(status) {
-  return `<span class="status-badge status-${status}">${STATUS_LABELS[status] || status}</span>`;
-}
-
+function statusBadge(s) { return `<span class="status-badge status-${s}">${STATUS_LABELS[s]||s}</span>`; }
 function wsBadge(ws) {
   if (!ws || ws === 'none') return '';
-  const color = wsColor(ws);
-  return `<span class="tag tag-ws bg-ws-${ws}" style="color:${color}">${ws.replace('WS-','')}</span>`;
+  const c = wsColor(ws);
+  return `<span class="tag tag-ws bg-ws-${ws}" style="color:${c}">${ws.replace('WS-','')}</span>`;
 }
-
-function repoBadge(repoId) {
-  if (!repoId || !STATE.selectedRepo === '') return '';
-  return `<span class="tag tag-repo">${repoId}</span>`;
-}
-
 function priorityBadge(p) {
   if (!p) return '';
-  const color = priorityColor(p);
-  return `<span class="tag tag-priority" style="background:${color}1a; color:${color}">${p}</span>`;
+  const c = priorityColor(p);
+  return `<span class="tag tag-priority" style="background:${c}1a;color:${c}">${p}</span>`;
 }
+function formatDate(d) { return d ? String(d).substring(0,10) : '—'; }
 
-function formatDate(d) {
-  if (!d) return '—';
-  return String(d).substring(0, 10);
-}
-
-function safeHTML(str) {
+function safeHTML(s) {
   const d = document.createElement('div');
-  d.textContent = str;
+  d.textContent = (s == null) ? '' : String(s);
   return d.innerHTML;
 }
 
@@ -381,206 +427,11 @@ function getFilteredTickets() {
       if (!t.id.toLowerCase().includes(q) && !t.title.toLowerCase().includes(q)) return false;
     }
     if (f.workstream && t.workstream !== f.workstream && !(f.workstream === 'none' && !t.workstream)) return false;
-    if (f.phase     && t.phase     !== f.phase)     return false;
-    if (f.team      && !(t.team || '').toLowerCase().includes(f.team.toLowerCase())) return false;
-    if (f.priority  && t.priority  !== f.priority)  return false;
-    if (f.status    && t.status    !== f.status)    return false;
+    if (f.phase    && t.phase    !== f.phase)    return false;
+    if (f.team     && !(t.team||'').toLowerCase().includes(f.team.toLowerCase())) return false;
+    if (f.priority && t.priority !== f.priority) return false;
+    if (f.status   && t.status   !== f.status)   return false;
     return true;
-  });
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   VIEW: OVERVIEW
-   ═══════════════════════════════════════════════════════════════ */
-
-function renderOverview(container) {
-  const active   = getActiveTickets();
-  const archived = getArchivedTickets();
-  const progs    = getProgrammes();
-
-  const stats = {};
-  for (const t of active) stats[t.status] = (stats[t.status] || 0) + 1;
-
-  const statusSummaryHtml = STATUS_ORDER.map(s => {
-    const count = stats[s] || 0;
-    if (count === 0) return '';
-    return `
-      <div class="stat-card" style="cursor:pointer" onclick="applyStatusFilter('${s}')">
-        <div class="stat-number" style="color:${statusColor(s)}">${count}</div>
-        <div class="stat-label">${STATUS_LABELS[s] || s}</div>
-      </div>`;
-  }).join('');
-
-  if (!STATE.selectedRepo && STATE.data && STATE.data.repos) {
-    const repoCards = STATE.data.repos.map(r => {
-      const repoActive = STATE.data.tickets.active.filter(t => t.repoId === r.id);
-      const repoArchived = STATE.data.tickets.archived.filter(t => t.repoId === r.id);
-      const activeCount = repoActive.length;
-      const archivedCount = repoArchived.length;
-      
-      const rStats = {};
-      for (const t of repoActive) rStats[t.status] = (rStats[t.status] || 0) + 1;
-      
-      const statusSegs = STATUS_ORDER.map(s => {
-        const count = rStats[s] || 0;
-        if (count === 0) return '';
-        const pct = ((count / activeCount) * 100).toFixed(1);
-        return `<div class="ws-status-seg" style="width:${pct}%; background:${statusColor(s)}" title="${STATUS_LABELS[s] || s}: ${count}"></div>`;
-      }).join('');
-
-      return `
-        <div class="ws-card fade-in" style="position:relative; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 22px; box-shadow: var(--shadow-card); min-height: 170px; display:flex; flex-direction:column; justify-content:space-between; cursor:pointer; transition: transform var(--t-fast), border var(--t-fast);" onclick="selectRepoAndExplore('${r.id}')">
-          <div style="position:absolute;top:0;left:0;right:0;height:3px;background:var(--indigo-500);border-radius:10px 10px 0 0"></div>
-          <div>
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-              <span style="font-size:13px; font-weight:700; color:var(--text-primary); font-family:monospace;">${r.id}</span>
-              <span class="tag tag-repo" style="font-size:9px; background: rgba(99,102,241,0.15); color: var(--indigo-400);">${r.label}</span>
-            </div>
-            <div style="font-size:24px; font-weight:800; color:var(--text-primary); margin-bottom:4px; font-family:'JetBrains Mono', monospace;">${activeCount}</div>
-            <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600; margin-bottom:10px;">Active Tickets</div>
-          </div>
-          <div>
-            <div style="display:flex; justify-content:space-between; font-size:10px; color:var(--text-secondary); margin-bottom:6px;">
-              <span>Archived: <strong>${archivedCount}</strong></span>
-              <span>Total: <strong>${activeCount + archivedCount}</strong></span>
-            </div>
-            ${activeCount > 0 ? `
-              <div class="ws-status-bar" style="height:5px; background:rgba(255,255,255,0.03); border-radius:3px; overflow:hidden; display:flex;">
-                ${statusSegs}
-              </div>
-            ` : `<div style="height:5px; background:rgba(255,255,255,0.01); border-radius:3px;"></div>`}
-          </div>
-        </div>
-      `;
-    }).join('');
-
-    container.innerHTML = `
-      <div class="view-programme fade-in" style="padding: 24px; max-width: 1200px;">
-        <div class="section-header" style="margin-bottom:30px; display:flex; justify-content:space-between; align-items:center;">
-          <div>
-            <h1 style="font-size:20px; font-weight:800; display:flex; align-items:center; gap:10px; margin:0 0 4px;">
-              <span>🏢</span> Sovereign Multi-Repository Workspaces
-            </h1>
-            <span class="section-meta" style="font-size:12px; color:var(--text-muted);">${active.length} active tickets across ${STATE.data.repos.length} repositories</span>
-          </div>
-        </div>
-
-        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:20px; margin-bottom:32px;">
-          ${repoCards}
-        </div>
-        
-        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 20px;">
-          <h3 style="font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--text-muted); margin:0 0 16px; display:flex; align-items:center; gap:8px;">
-            <span>📈</span> Cumulative Status Distribution
-          </h3>
-          <div style="display:flex; flex-wrap:wrap; gap:12px;">
-            ${statusSummaryHtml}
-          </div>
-        </div>
-      </div>
-    `;
-    
-    window.selectRepoAndExplore = function(repoId) {
-      STATE.selectedRepo = repoId;
-      const sel = document.getElementById('repo-select');
-      if (sel) sel.value = repoId;
-      updateSidebarStats();
-      updateBadges();
-      renderOverview(container);
-    };
-    return;
-  }
-
-  const wsData = {};
-  for (const t of active) {
-    const ws = t.workstream || 'none';
-    if (!wsData[ws]) wsData[ws] = { total: 0, byStatus: {} };
-    wsData[ws].total++;
-    wsData[ws].byStatus[t.status] = (wsData[ws].byStatus[t.status] || 0) + 1;
-  }
-
-  const programme = progs?.[0];
-  const phases    = programme?.phases || [];
-
-  const phaseIcons = { COMPLETE: '✓', ACTIVE: '◉', PENDING: '○' };
-
-  const phasesHtml = phases.map(ph => {
-    const gs   = ph.gateStatus.toLowerCase();
-    const icon = phaseIcons[ph.gateStatus] || '○';
-    return `
-      <div class="phase-card">
-        <div class="phase-dot ${gs}" title="${ph.gateStatus}">${icon}</div>
-        <div class="phase-body">
-          <div class="phase-body-top">
-            <div class="phase-title">${safeHTML(ph.title)}</div>
-            <div class="phase-status-badge ${gs}">${ph.gateStatus}</div>
-          </div>
-          ${ph.objective ? `<div class="phase-objective">${safeHTML(ph.objective)}</div>` : ''}
-        </div>
-      </div>`;
-  }).join('');
-
-  const allWs = Object.keys(WS_COLORS).filter(ws => wsData[ws]);
-  const wsCardsHtml = allWs.map(ws => {
-    const info  = wsData[ws] || { total: 0, byStatus: {} };
-    const color = wsColor(ws);
-    const statusSegs = STATUS_ORDER.map(s => {
-      const count = info.byStatus[s] || 0;
-      if (count === 0) return '';
-      const pct = ((count / info.total) * 100).toFixed(1);
-      return `<div class="ws-status-seg" style="width:${pct}%; background:${statusColor(s)}" title="${s}: ${count}"></div>`;
-    }).join('');
-    const label = ws === 'none' ? 'Unassigned' : ws;
-    return `
-      <div class="ws-card" data-ws="${ws}" title="${label}">
-        <div style="position:absolute;top:0;left:0;right:0;height:2px;background:${color};border-radius:10px 10px 0 0"></div>
-        <div class="ws-card-header">
-          <div class="ws-id" style="color:${color}">${label}</div>
-        </div>
-        <div class="ws-count" style="color:${color}">${info.total}</div>
-        <div class="ws-count-label">tickets</div>
-        <div class="ws-status-bar">${statusSegs}</div>
-      </div>`;
-  }).join('');
-
-  const repoLabel = STATE.selectedRepo
-    ? STATE.data.repos.find(r => r.id === STATE.selectedRepo)?.label || STATE.selectedRepo
-    : 'All Repos';
-
-  container.innerHTML = `
-    <div class="view-programme fade-in">
-      <div class="section-header">
-        <h1>${programme ? safeHTML(programme.title) : repoLabel}</h1>
-        <span class="section-meta">${active.length} active tickets · ${archived.length} archived</span>
-      </div>
-
-      <div class="stats-row" style="margin-bottom:24px">
-        ${statusSummaryHtml}
-      </div>
-
-      ${phases.length > 0 ? `
-        <div class="section-header">
-          <h2 style="font-size:13px; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:.07em">Phase Timeline</h2>
-        </div>
-        <div class="phase-timeline" style="margin-bottom:32px">
-          ${phasesHtml}
-        </div>
-      ` : ''}
-
-      <div class="section-header">
-        <h2 style="font-size:13px; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:.07em">Workstreams</h2>
-      </div>
-      <div class="workstream-grid">
-        ${wsCardsHtml || '<div style="color:var(--text-muted);padding:16px">No workstream data.</div>'}
-      </div>
-    </div>`;
-
-  container.querySelectorAll('.ws-card[data-ws]').forEach(card => {
-    card.addEventListener('click', () => {
-      const ws = card.dataset.ws;
-      STATE.filters.workstream = ws === 'none' ? '' : ws;
-      navigateTo('board');
-    });
   });
 }
 
@@ -589,9 +440,327 @@ window.applyStatusFilter = function(status) {
   navigateTo('board');
 };
 
-/* ═══════════════════════════════════════════════════════════════
-   VIEW: BOARD (KANBAN)
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// VIEW: OVERVIEW (Paperclip-grade multi-repo)
+// =========================================================================
+
+function renderOverview(container) {
+  const allActive   = STATE.data.tickets.active;
+  const allArchived = STATE.data.tickets.archived;
+  const repos       = STATE.data.repos || [];
+  const activeProcessCount = Array.from(STATE.processes.values()).filter(p => p.meta.status === 'running').length;
+
+  // KPIs
+  const blocked = allActive.filter(t => t.status === 'BLOCKED').length;
+  const inProg  = allActive.filter(t => t.status === 'IN_PROGRESS').length;
+  const waiting = allActive.filter(t => t.status === 'WAITING_INPUT').length;
+
+  const kpisHtml = `
+    <div class="zaf-kpi accent"><div class="zaf-kpi-label">Active tickets</div><div class="zaf-kpi-value">${allActive.length}</div><div class="zaf-kpi-delta">across ${repos.length} repos</div></div>
+    <div class="zaf-kpi"><div class="zaf-kpi-label">In progress</div><div class="zaf-kpi-value">${inProg}</div><div class="zaf-kpi-delta">live execution</div></div>
+    <div class="zaf-kpi"><div class="zaf-kpi-label">Blocked</div><div class="zaf-kpi-value" style="color:var(--status-blocked)">${blocked}</div><div class="zaf-kpi-delta">need unblock</div></div>
+    <div class="zaf-kpi"><div class="zaf-kpi-label">Waiting</div><div class="zaf-kpi-value" style="color:var(--status-waiting)">${waiting}</div><div class="zaf-kpi-delta">human input</div></div>
+    <div class="zaf-kpi"><div class="zaf-kpi-label">Subshells</div><div class="zaf-kpi-value" style="color:var(--indigo-400)">${activeProcessCount}</div><div class="zaf-kpi-delta">running now</div></div>
+  `;
+
+  // Per-repo cards
+  const repoCardsHtml = repos.map(r => {
+    const repoActive   = allActive.filter(t => t.repoId === r.id);
+    const repoArchived = allArchived.filter(t => t.repoId === r.id);
+    const byStatus = {};
+    for (const t of repoActive) byStatus[t.status] = (byStatus[t.status] || 0) + 1;
+
+    const kanbanCells = STATUS_ORDER.map(s => `
+      <div class="zaf-kanban-cell" title="${STATUS_LABELS[s]}: ${byStatus[s]||0}">
+        <div class="kc-count" style="color:${statusColor(s)}">${byStatus[s] || 0}</div>
+        <div class="kc-label">${(STATUS_LABELS[s]||s).split(' ')[0]}</div>
+        <div class="kc-bar" style="background:${statusColor(s)}"></div>
+      </div>`).join('');
+
+    // Analyst load: tickets per role
+    const loadByRole = {};
+    for (const t of repoActive) {
+      const roles = (t.roles && t.roles.length) ? t.roles : ['unassigned'];
+      for (const role of roles) loadByRole[role] = (loadByRole[role] || 0) + 1;
+    }
+    const maxLoad = Math.max(1, ...Object.values(loadByRole));
+    const analystRows = Object.entries(loadByRole)
+      .sort((a,b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([role, n]) => `
+        <div class="zaf-analyst-row">
+          <div class="zaf-analyst-name">${safeHTML(role)}</div>
+          <div class="zaf-analyst-bar"><div class="zaf-analyst-fill" style="width:${(n/maxLoad*100).toFixed(0)}%"></div></div>
+          <div class="zaf-analyst-count">${n}</div>
+        </div>`).join('');
+
+    return `
+      <div class="zaf-repo-card" data-repo="${safeHTML(r.id)}">
+        <div class="zaf-repo-card-top">
+          <div>
+            <div class="zaf-repo-name">${safeHTML(r.id)}</div>
+            <div class="zaf-repo-label">${safeHTML(r.label)}</div>
+          </div>
+          <div class="zaf-repo-totals">
+            <div class="zaf-repo-active">${repoActive.length}</div>
+            <div class="zaf-repo-active-label">active</div>
+          </div>
+        </div>
+        <div class="zaf-kanban-gauge">${kanbanCells}</div>
+        <div class="zaf-analyst-load">
+          <div class="zaf-analyst-load-title"><span>Analyst load (per role)</span><span>${Object.keys(loadByRole).length} roles</span></div>
+          ${analystRows || '<div style="font-size:10px;color:var(--text-muted);padding:6px 0">No assigned roles.</div>'}
+        </div>
+        <div class="zaf-repo-footer">
+          <span>Archived <strong>${repoArchived.length}</strong></span>
+          <span>Total <strong>${repoActive.length + repoArchived.length}</strong></span>
+        </div>
+      </div>`;
+  }).join('');
+
+  // Aggregate phase strip (across all programmes, dedup by title)
+  const programmes = STATE.data.programmes || [];
+  const allPhases = [];
+  const seenPhase = new Set();
+  for (const p of programmes) {
+    for (const ph of (p.phases || [])) {
+      const key = (p.repoId || '') + '|' + ph.title;
+      if (!seenPhase.has(key)) {
+        seenPhase.add(key);
+        allPhases.push({ ...ph, repoId: p.repoId });
+      }
+    }
+  }
+  const phasesHtml = allPhases.slice(0, 12).map(ph => `
+    <div class="zaf-phase-chip ${ph.gateStatus.toLowerCase()}">
+      <div class="ph-dot"></div>
+      <div class="ph-title">${safeHTML(ph.title)}</div>
+      <div class="ph-status">${ph.gateStatus}</div>
+    </div>`).join('');
+
+  container.innerHTML = `
+    <div class="zaf-overview fade-in">
+      <div class="zaf-overview-header">
+        <div>
+          <div class="zaf-overview-title"><div class="accent-bar"></div>Sovereign Multi-Workspace Overview</div>
+          <div class="zaf-overview-sub">Unified view across ${repos.length} repositories — live telemetry, analyst load, and phase gate status.</div>
+        </div>
+        <div class="zaf-overview-kpis">${kpisHtml}</div>
+      </div>
+
+      <div class="zaf-overview-section">
+        <div class="zaf-section-title"><div class="accent-dot"></div>Repositories</div>
+        <div class="zaf-repo-grid">${repoCardsHtml || '<div style="color:var(--text-muted)">No repos discovered.</div>'}</div>
+      </div>
+
+      ${phasesHtml ? `
+      <div class="zaf-overview-section">
+        <div class="zaf-section-title"><div class="accent-dot"></div>Phase Gate Status</div>
+        <div class="zaf-phase-strip">${phasesHtml}</div>
+      </div>` : ''}
+    </div>`;
+
+  container.querySelectorAll('.zaf-repo-card[data-repo]').forEach(card => {
+    card.addEventListener('click', () => {
+      const repoId = card.dataset.repo;
+      STATE.selectedRepo = repoId;
+      const sel = document.getElementById('repo-select');
+      if (sel) sel.value = repoId;
+      updateSidebarStats(); updateBadges();
+      navigateTo('board');
+    });
+  });
+}
+
+// =========================================================================
+// VIEW: FLEET
+// =========================================================================
+
+function updateFleetBadge() {
+  const active = Array.from(STATE.fleetProcessIds)
+    .map(id => STATE.processes.get(id)?.meta)
+    .filter(m => m && (m.status === 'running' || m.status === 'pre-fire')).length;
+  const el = document.getElementById('badge-fleet');
+  if (el) el.textContent = active || STATE.fleetProcessIds.size || '—';
+}
+
+function renderFleet(container) {
+  const tickets = getActiveTickets();
+  const fleetMetas = Array.from(STATE.fleetProcessIds)
+    .map(id => STATE.processes.get(id)?.meta)
+    .filter(Boolean);
+  const activeFleet = fleetMetas.filter(m => m.status === 'running' || m.status === 'pre-fire');
+
+  const harnesses = ['mock', 'claude-code', 'codex', 'gemini-cli', 'zo'];
+  const defaultHarness = STATE.config?.agents?.engineering?.harness || 'mock';
+
+  const gridRows = fleetMetas.length === 0
+    ? `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:24px">No fleet runs yet — dispatch below</td></tr>`
+    : fleetMetas.map(m => {
+        const elapsed = m.durationSec != null
+          ? m.durationSec.toFixed(1) + 's'
+          : ((Date.now() - m.startTime) / 1000).toFixed(1) + 's';
+        const statusColor = {
+          running:'#6366f1', 'pre-fire':'#f59e0b', completed:'#22c55e',
+          failed:'#ef4444', killed:'#64748b', paused_rate_limit:'#f97316',
+        }[m.status] || '#94a3b8';
+        return `<tr data-pid="${m.processId}">
+          <td><code style="font-size:11px">${m.ticketId}</code></td>
+          <td>${m.harness === 'mock' ? '<span title="Test-only harness. Produces synthetic agent output to validate the ZAF pipeline without consuming AI credits. Not a real AI.">Simulator</span>' : m.harness}</td>
+          <td>${m.role}</td>
+          <td><span style="color:${statusColor};font-weight:600">${m.status}</span></td>
+          <td>${elapsed}</td>
+          <td>
+            <button class="btn btn-secondary" style="padding:2px 8px;font-size:11px"
+              onclick="openConsoleForProcess('${m.processId}')">PTY</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+  const ticketPickerRows = tickets.map(t => {
+    const sel = STATE.fleetSelectedTickets.has(t.id);
+    return `<tr class="fleet-picker-row${sel ? ' selected' : ''}" data-ticket-id="${t.id}">
+      <td><input type="checkbox" class="fleet-chk" data-id="${t.id}" ${sel ? 'checked' : ''} /></td>
+      <td><code style="font-size:11px">${t.id}</code></td>
+      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</td>
+      <td><span style="color:${STATUS_COLORS[t.status]||'#94a3b8'};font-size:11px">${t.status}</span></td>
+    </tr>`;
+  }).join('');
+
+  const harnessOptions = harnesses.map(h => `<option value="${h}"${h===defaultHarness?' selected':''}>${displayHarness(h)}</option>`).join('');
+
+  container.innerHTML = `
+    <div class="view-content fade-in">
+      <div class="view-header">
+        <h1 class="view-title">Fleet Dispatch</h1>
+        <div class="view-actions">
+          <button class="btn btn-danger" id="fleet-stop-btn" ${activeFleet.length===0?'disabled':''}>
+            ⏻ Stop Fleet (${activeFleet.length} active)
+          </button>
+        </div>
+      </div>
+
+      <section class="fleet-section">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:12px">Live Grid</h3>
+        <div class="fleet-grid-wrapper">
+          <table class="fleet-grid">
+            <thead>
+              <tr>
+                <th>Ticket</th><th>Harness</th><th>Role</th><th>Status</th><th>Elapsed</th><th>PTY</th>
+              </tr>
+            </thead>
+            <tbody id="fleet-grid-body">
+              ${gridRows}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="fleet-section" style="margin-top:24px">
+        <h3 style="font-size:13px;font-weight:600;color:var(--text-muted);margin-bottom:12px">Dispatch Tickets</h3>
+        <div style="display:flex;gap:12px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <label style="font-size:12px;color:var(--text-muted)">Harness:</label>
+          <select id="fleet-harness-select" class="filter-select" style="width:140px">
+            ${harnessOptions}
+          </select>
+          <label style="font-size:12px;color:var(--text-muted)">Role:</label>
+          <input id="fleet-role-input" class="filter-input" style="width:120px" value="engineering" placeholder="role" />
+          <button class="btn btn-primary" id="fleet-dispatch-btn">⚡ Dispatch Selected</button>
+          <button class="btn btn-secondary" id="fleet-select-all-btn">Select All</button>
+          <button class="btn btn-secondary" id="fleet-deselect-all-btn">Deselect All</button>
+        </div>
+        <div class="fleet-picker-wrapper">
+          <table class="fleet-grid">
+            <thead>
+              <tr>
+                <th style="width:32px"></th>
+                <th>ID</th><th>Title</th><th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="fleet-picker-body">
+              ${ticketPickerRows || '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);padding:16px">No active tickets</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>`;
+
+  // Bind Live Grid row click → open PTY (TKT-ZAF-0020)
+  container.querySelectorAll('#fleet-grid-body tr[data-pid]').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.closest('button')) return;
+      openConsoleForProcess(row.dataset.pid);
+    });
+  });
+
+  // Bind Stop Fleet
+  container.querySelector('#fleet-stop-btn')?.addEventListener('click', async () => {
+    if (!confirm('Stop all fleet processes?')) return;
+    await fetch('/api/fleet/stop', { method: 'POST' });
+  });
+
+  // Bind dispatch
+  container.querySelector('#fleet-dispatch-btn')?.addEventListener('click', async () => {
+    const harness = container.querySelector('#fleet-harness-select')?.value || defaultHarness;
+    const role    = container.querySelector('#fleet-role-input')?.value || 'engineering';
+    const ticketIds = Array.from(STATE.fleetSelectedTickets);
+    if (ticketIds.length === 0) { alert('Select at least one ticket'); return; }
+    const ticketsList = ticketIds.map(id => ({ ticketId: id, role, harness }));
+    const r = await fetch('/api/fleet/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tickets: ticketsList }),
+    });
+    const data = await r.json();
+    if (data.dispatched) {
+      data.dispatched.forEach(pid => STATE.fleetProcessIds.add(pid));
+      updateFleetBadge();
+      STATE.fleetSelectedTickets.clear();
+      renderFleet(container);
+    }
+  });
+
+  // Bind checkboxes
+  container.querySelectorAll('.fleet-chk').forEach(chk => {
+    chk.addEventListener('change', () => {
+      if (chk.checked) STATE.fleetSelectedTickets.add(chk.dataset.id);
+      else STATE.fleetSelectedTickets.delete(chk.dataset.id);
+      chk.closest('tr')?.classList.toggle('selected', chk.checked);
+    });
+  });
+
+  // Row click toggles checkbox
+  container.querySelectorAll('.fleet-picker-row').forEach(row => {
+    row.addEventListener('click', e => {
+      if (e.target.tagName === 'INPUT') return;
+      const chk = row.querySelector('.fleet-chk');
+      if (!chk) return;
+      chk.checked = !chk.checked;
+      chk.dispatchEvent(new Event('change'));
+    });
+  });
+
+  // Select/deselect all
+  container.querySelector('#fleet-select-all-btn')?.addEventListener('click', () => {
+    tickets.forEach(t => STATE.fleetSelectedTickets.add(t.id));
+    renderFleet(container);
+  });
+  container.querySelector('#fleet-deselect-all-btn')?.addEventListener('click', () => {
+    STATE.fleetSelectedTickets.clear();
+    renderFleet(container);
+  });
+}
+
+function openConsoleForProcess(processId) {
+  STATE.activeProcessTab = processId;
+  openConsolePanel();
+  renderConsoleTabs();
+  document.getElementById('topbar-console-toggle')?.classList.add('active');
+}
+
+// =========================================================================
+// VIEW: BOARD
+// =========================================================================
 
 function renderBoard(container) {
   const tickets = getFilteredTickets();
@@ -601,42 +770,27 @@ function renderBoard(container) {
   const phases      = [...new Set(active.map(t => t.phase).filter(Boolean))].sort();
   const priorities  = ['P0','P1','P2','P3'];
 
-  const wsOptions = ['<option value="">All Workstreams</option>',
-    ...workstreams.map(ws => `<option value="${ws}" ${STATE.filters.workstream === ws ? 'selected' : ''}>${ws}</option>`)
-  ].join('');
-
-  const phaseOptions = ['<option value="">All Phases</option>',
-    ...phases.map(p => `<option value="${p}" ${STATE.filters.phase === p ? 'selected' : ''}>${p}</option>`)
-  ].join('');
-
-  const statusOptions = ['<option value="">All Statuses</option>',
-    ...STATUS_ORDER.map(s => `<option value="${s}" ${STATE.filters.status === s ? 'selected' : ''}>${STATUS_LABELS[s]}</option>`)
-  ].join('');
-
-  const prioOptions = ['<option value="">All Priorities</option>',
-    ...priorities.map(p => `<option value="${p}" ${STATE.filters.priority === p ? 'selected' : ''}>${p}</option>`)
-  ].join('');
+  const opt = (val, sel, label) => `<option value="${val}" ${sel===val?'selected':''}>${label}</option>`;
+  const wsOptions     = `<option value="">All Workstreams</option>` + workstreams.map(w => opt(w, STATE.filters.workstream, w)).join('');
+  const phaseOptions  = `<option value="">All Phases</option>`      + phases.map(p => opt(p, STATE.filters.phase, p)).join('');
+  const statusOptions = `<option value="">All Statuses</option>`    + STATUS_ORDER.map(s => opt(s, STATE.filters.status, STATUS_LABELS[s])).join('');
+  const prioOptions   = `<option value="">All Priorities</option>`  + priorities.map(p => opt(p, STATE.filters.priority, p)).join('');
 
   const groups = {};
   for (const s of STATUS_ORDER) groups[s] = [];
-  for (const t of tickets) {
-    const key = STATUS_ORDER.includes(t.status) ? t.status : 'OPEN';
-    groups[key].push(t);
-  }
+  for (const t of tickets) (groups[STATUS_ORDER.includes(t.status) ? t.status : 'OPEN']).push(t);
 
-  const columnsHtml = STATUS_ORDER.map(status => {
-    const col  = groups[status] || [];
-    const dot  = `<div class="column-dot" style="background:${statusColor(status)}"></div>`;
-    const cardsHtml = col.map(t => renderTicketCard(t)).join('');
+  const columns = STATUS_ORDER.map(s => {
+    const col = groups[s] || [];
     return `
       <div class="board-column">
         <div class="column-header">
-          ${dot}
-          <div class="column-title">${STATUS_LABELS[status] || status}</div>
+          <div class="column-dot" style="background:${statusColor(s)}"></div>
+          <div class="column-title">${STATUS_LABELS[s]||s}</div>
           <div class="column-count">${col.length}</div>
         </div>
         <div class="column-cards">
-          ${cardsHtml || `<div style="padding:12px 8px;font-size:11px;color:var(--text-muted);text-align:center">No tickets</div>`}
+          ${col.map(renderTicketCard).join('') || `<div style="padding:12px 8px;font-size:11px;color:var(--text-muted);text-align:center">No tickets</div>`}
         </div>
       </div>`;
   }).join('');
@@ -654,60 +808,34 @@ function renderBoard(container) {
         ${hasFilters ? `<span class="filter-clear" id="filter-clear">✕ Clear filters</span>` : ''}
         <div class="board-result-count">${tickets.length} of ${active.length} tickets</div>
       </div>
-      <div class="board-columns">
-        ${columnsHtml}
-      </div>
+      <div class="board-columns">${columns}</div>
     </div>`;
 
-  container.querySelector('#board-search')?.addEventListener('input', e => {
-    STATE.filters.search = e.target.value;
-    renderBoard(container);
-  });
-  container.querySelector('#filter-ws')?.addEventListener('change', e => {
-    STATE.filters.workstream = e.target.value;
-    renderBoard(container);
-  });
-  container.querySelector('#filter-phase')?.addEventListener('change', e => {
-    STATE.filters.phase = e.target.value;
-    renderBoard(container);
-  });
-  container.querySelector('#filter-status')?.addEventListener('change', e => {
-    STATE.filters.status = e.target.value;
-    renderBoard(container);
-  });
-  container.querySelector('#filter-priority')?.addEventListener('change', e => {
-    STATE.filters.priority = e.target.value;
-    renderBoard(container);
-  });
-  container.querySelector('#filter-clear')?.addEventListener('click', () => {
-    STATE.filters = { search: '', workstream: '', phase: '', team: '', priority: '', status: '' };
-    renderBoard(container);
-  });
-
-  container.querySelectorAll('.ticket-card[data-id]').forEach(card => {
-    card.addEventListener('click', () => openDetailPanel(card.dataset.id));
-  });
+  container.querySelector('#board-search')?.addEventListener('input', e => { STATE.filters.search = e.target.value; renderBoard(container); });
+  container.querySelector('#filter-ws')?.addEventListener('change', e => { STATE.filters.workstream = e.target.value; renderBoard(container); });
+  container.querySelector('#filter-phase')?.addEventListener('change', e => { STATE.filters.phase = e.target.value; renderBoard(container); });
+  container.querySelector('#filter-status')?.addEventListener('change', e => { STATE.filters.status = e.target.value; renderBoard(container); });
+  container.querySelector('#filter-priority')?.addEventListener('change', e => { STATE.filters.priority = e.target.value; renderBoard(container); });
+  container.querySelector('#filter-clear')?.addEventListener('click', () => { STATE.filters = { search:'', workstream:'', phase:'', team:'', priority:'', status:'' }; renderBoard(container); });
+  container.querySelectorAll('.ticket-card[data-id]').forEach(card => card.addEventListener('click', () => openDetailPanel(card.dataset.id)));
 }
 
 function renderTicketCard(t) {
   const blockerCount = t.blocked_by?.filter(b => !b.startsWith('ENZO')).length || 0;
   const blocksCount  = t.blocks?.length || 0;
   const showRepo     = !STATE.selectedRepo && t.repoId;
-
   const tags = [
     wsBadge(t.workstream),
     priorityBadge(t.priority),
     showRepo ? `<span class="tag tag-repo">${safeHTML(t.repoId)}</span>` : '',
     t.team ? `<span class="tag tag-team">${safeHTML(t.team.split('+')[0].trim())}</span>` : '',
-    blockerCount > 0 ? `<span class="tag tag-blocked">⊗ ${blockerCount} blocker${blockerCount > 1 ? 's':''}</span>` : '',
+    blockerCount > 0 ? `<span class="tag tag-blocked">⊗ ${blockerCount} blocker${blockerCount>1?'s':''}</span>` : '',
   ].filter(Boolean).join('');
-
-  const leftBorderColor = t.blocked_by?.length ? '#ef4444' :
+  const leftBorder = t.blocked_by?.length ? '#ef4444' :
     t.status === 'IN_PROGRESS' ? '#6366f1' :
     t.workstream ? wsColor(t.workstream) : '#333';
-
   return `
-    <div class="ticket-card" data-id="${t.id}" style="border-left:3px solid ${leftBorderColor}20">
+    <div class="ticket-card" data-id="${t.id}" style="border-left:3px solid ${leftBorder}20">
       <div class="ticket-card-id">${t.id}</div>
       <div class="ticket-card-title">${safeHTML(t.title)}</div>
       <div class="ticket-card-tags">${tags}</div>
@@ -718,14 +846,11 @@ function renderTicketCard(t) {
     </div>`;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   DETAIL PANEL
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// DETAIL PANEL + RUN AGENT
+// =========================================================================
 
-function bindDetailClose() {
-  document.getElementById('detail-close').addEventListener('click', closeDetailPanel);
-}
-
+function bindDetailClose() { document.getElementById('detail-close').addEventListener('click', closeDetailPanel); }
 function closeDetailPanel() {
   document.getElementById('detail-panel').classList.add('hidden');
   STATE.selectedTicketId = null;
@@ -735,81 +860,113 @@ function openDetailPanel(id) {
   const t = STATE.ticketMap[id];
   if (!t) return;
   STATE.selectedTicketId = id;
-
   const panel = document.getElementById('detail-panel');
   panel.classList.remove('hidden');
 
   const runBtn = document.getElementById('detail-run-btn');
   if (runBtn) {
-    if (t.status !== 'DONE' && t.status !== 'ARCHIVED') {
-      runBtn.classList.remove('hidden');
-    } else {
-      runBtn.classList.add('hidden');
-    }
+    if (t.status !== 'DONE' && t.status !== 'ARCHIVED') runBtn.classList.remove('hidden');
+    else runBtn.classList.add('hidden');
+    runBtn.textContent = '▶ Run Agent…';
+    runBtn.onclick = () => openLaunchPopover(t);
   }
 
   document.getElementById('detail-id').textContent    = t.id;
   document.getElementById('detail-title').textContent = t.title;
 
+  const LIFECYCLE_STATUSES = ['OPEN', 'IN_PROGRESS', 'BLOCKED', 'IN_REVIEW', 'DONE'];
+  const isArchived = t.status === 'VOIDED' || !getActiveTickets().find(a => a.id === t.id);
+  const statusDropdownHtml = isArchived ? statusBadge(t.status) : `
+    <select id="detail-status-select" class="zaf-status-select" data-current="${t.status}">
+      ${LIFECYCLE_STATUSES.map(s => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${STATUS_LABELS[s] || s}</option>`).join('')}
+    </select>`;
+  const archiveVoidHtml = isArchived ? '' : `
+    <button id="detail-archive-btn" class="zaf-btn secondary" style="margin-left:8px;font-size:10px;padding:3px 8px">Archive</button>
+    <button id="detail-void-btn" class="zaf-btn secondary" style="margin-left:4px;font-size:10px;padding:3px 8px;color:var(--amber-400)">Void</button>`;
+
   document.getElementById('detail-meta-row').innerHTML = [
-    statusBadge(t.status),
+    statusDropdownHtml,
     wsBadge(t.workstream),
     priorityBadge(t.priority),
-    t.phase    ? `<span class="tag tag-team">${t.phase}</span>` : '',
+    t.phase ? `<span class="tag tag-team">${t.phase}</span>` : '',
     t.archetype ? `<span class="tag tag-archetype">${t.archetype}</span>` : '',
-    t.repoId   ? `<span class="tag tag-repo">${safeHTML(t.repoId)}</span>` : '',
+    t.repoId ? `<span class="tag tag-repo">${safeHTML(t.repoId)}</span>` : '',
+    archiveVoidHtml,
   ].filter(Boolean).join('');
 
-  const metaFields = [
-    ['Programme', t.programme || '—'],
-    ['Team',      t.team      || '—'],
-    ['Phase',     t.phase     || '—'],
-    ['Priority',  t.priority  || '—'],
-    ['Archetype', t.archetype || '—'],
-    ['Project',   t.project   || '—'],
-    ['Repo',      t.repo      || '—'],
-    ['Created',   formatDate(t.created)],
-    ['Updated',   formatDate(t.updated)],
-    ['Usage',     t.usage_checkpoint || '—'],
-  ];
-
-  document.getElementById('detail-meta-grid').innerHTML = metaFields.map(([label, value]) =>
-    `<div class="meta-field">
-      <div class="meta-label">${label}</div>
-      <div class="meta-value">${safeHTML(String(value))}</div>
-    </div>`
-  ).join('');
-
-  const depsEl    = document.getElementById('detail-deps');
-  const blockedBy = t.blocked_by || [];
-  const blocks    = t.blocks || [];
-
-  if (blockedBy.length > 0 || blocks.length > 0) {
-    depsEl.style.display = 'block';
-    const blockedByChips = blockedBy.map(b => {
-      const linked = STATE.ticketMap[b];
-      return `<span class="dep-chip blocked-by" data-id="${b}" title="${linked ? linked.title : b}">⊗ ${b}</span>`;
-    }).join('');
-    const blocksChips = blocks.map(b => {
-      const linked = STATE.ticketMap[b];
-      return `<span class="dep-chip blocks" data-id="${b}" title="${linked ? linked.title : b}">→ ${b}</span>`;
-    }).join('');
-    depsEl.innerHTML = `
-      ${blockedBy.length > 0 ? `<div class="deps-title">Blocked by</div><div class="deps-chips">${blockedByChips}</div>` : ''}
-      ${blocks.length > 0 ? `<div class="deps-title" style="margin-top:10px">Blocks</div><div class="deps-chips">${blocksChips}</div>` : ''}`;
-
-    depsEl.querySelectorAll('.dep-chip[data-id]').forEach(chip => {
-      chip.addEventListener('click', () => openDetailPanel(chip.dataset.id));
+  // Bind status dropdown
+  const statusSel = document.getElementById('detail-status-select');
+  if (statusSel) {
+    statusSel.addEventListener('change', async () => {
+      const newStatus = statusSel.value;
+      if (newStatus === statusSel.dataset.current) return;
+      const r = await fetch(`/api/ticket/${encodeURIComponent(t.id)}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus, repo: t.repoId }),
+      });
+      if (!r.ok) { alert('Status update failed: HTTP ' + r.status); statusSel.value = statusSel.dataset.current; return; }
+      statusSel.dataset.current = newStatus;
+      t.status = newStatus;
     });
-  } else {
-    depsEl.style.display = 'none';
   }
+
+  // Bind archive button
+  const archiveBtn = document.getElementById('detail-archive-btn');
+  if (archiveBtn) {
+    archiveBtn.addEventListener('click', async () => {
+      if (!confirm(`Archive ${t.id}? It will be moved to ARCHIVED/.`)) return;
+      const r = await fetch(`/api/ticket/${encodeURIComponent(t.id)}/archive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo: t.repoId }),
+      });
+      if (!r.ok) { alert('Archive failed: HTTP ' + r.status); return; }
+      closeDetailPanel();
+    });
+  }
+
+  // Bind void button
+  const voidBtn = document.getElementById('detail-void-btn');
+  if (voidBtn) {
+    voidBtn.addEventListener('click', async () => {
+      if (!confirm(`Void ${t.id}? This marks it VOIDED and moves it to ARCHIVED/.`)) return;
+      const r = await fetch(`/api/ticket/${encodeURIComponent(t.id)}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo: t.repoId }),
+      });
+      if (!r.ok) { alert('Void failed: HTTP ' + r.status); return; }
+      closeDetailPanel();
+    });
+  }
+
+  const metaFields = [
+    ['Programme', t.programme || '—'], ['Team', t.team || '—'],
+    ['Phase', t.phase || '—'], ['Priority', t.priority || '—'],
+    ['Archetype', t.archetype || '—'], ['Project', t.project || '—'],
+    ['Repo', t.repo || '—'], ['Created', formatDate(t.created)],
+    ['Updated', formatDate(t.updated)], ['Usage', t.usage_checkpoint || '—'],
+  ];
+  document.getElementById('detail-meta-grid').innerHTML = metaFields.map(([l,v]) =>
+    `<div class="meta-field"><div class="meta-label">${l}</div><div class="meta-value">${safeHTML(String(v))}</div></div>`).join('');
+
+  const depsEl = document.getElementById('detail-deps');
+  const blockedBy = t.blocked_by || [];
+  const blocks = t.blocks || [];
+  if (blockedBy.length || blocks.length) {
+    depsEl.style.display = 'block';
+    depsEl.innerHTML = `
+      ${blockedBy.length ? `<div class="deps-title">Blocked by</div><div class="deps-chips">${blockedBy.map(b => `<span class="dep-chip blocked-by" data-id="${b}">⊗ ${b}</span>`).join('')}</div>` : ''}
+      ${blocks.length    ? `<div class="deps-title" style="margin-top:10px">Blocks</div><div class="deps-chips">${blocks.map(b => `<span class="dep-chip blocks" data-id="${b}">→ ${b}</span>`).join('')}</div>` : ''}`;
+    depsEl.querySelectorAll('.dep-chip[data-id]').forEach(c => c.addEventListener('click', () => openDetailPanel(c.dataset.id)));
+  } else depsEl.style.display = 'none';
 
   const bodyEl = document.getElementById('detail-markdown');
   if (t.body && typeof marked !== 'undefined') {
     marked.setOptions({ breaks: true, gfm: true });
     bodyEl.innerHTML = `<div class="md-content">${marked.parse(t.body)}</div>`;
-    bodyEl.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.disabled = true; });
+    bodyEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = true);
   } else {
     bodyEl.innerHTML = `<div style="color:var(--text-muted);font-size:12px">${safeHTML(t.body || 'No body.')}</div>`;
   }
@@ -818,26 +975,265 @@ function openDetailPanel(id) {
   setTimeout(() => panel.classList.remove('slide-in'), 300);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   VIEW: DEPENDENCY GRAPH (v2 — draggable nodes)
-   ═══════════════════════════════════════════════════════════════ */
+// Real model IDs per harness (TKT-ZAF-0029)
+const HARNESS_MODEL_IDS = {
+  'claude-code': [
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fast, low cost' },
+    { id: 'claude-sonnet-4-6',          label: 'Sonnet 4.6 — balanced' },
+    { id: 'claude-opus-4-7',            label: 'Opus 4.7 — highest capability' },
+  ],
+  'claude': [
+    { id: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 — fast, low cost' },
+    { id: 'claude-sonnet-4-6',          label: 'Sonnet 4.6 — balanced' },
+    { id: 'claude-opus-4-7',            label: 'Opus 4.7 — highest capability' },
+  ],
+  'codex': [
+    { id: 'gpt-4o-mini', label: 'GPT-4o mini — fast, low cost' },
+    { id: 'gpt-4o',      label: 'GPT-4o — balanced' },
+    { id: 'o3-mini',     label: 'o3-mini — reasoning' },
+  ],
+  'antigravity': [
+    { id: 'placeholder', label: '(stub — TBD from README)' },
+  ],
+};
 
-function renderGraph(container) {
-  const graph    = STATE.data.graph;
-  const active   = getActiveTickets();
-  const activeIds = new Set(active.map(t => t.id));
+const ROLE_RECOMMENDATIONS = {
+  thinker:  { modelId: 'claude-sonnet-4-6',          reasoning: 'high',   label: 'Sonnet 4.6 + high reasoning' },
+  worker:   { modelId: 'claude-haiku-4-5-20251001',  reasoning: 'medium', label: 'Haiku 4.5 + medium reasoning' },
+  reviewer: { modelId: 'claude-sonnet-4-6',          reasoning: 'high',   label: 'Sonnet 4.6 + high reasoning' },
+};
 
-  const connectedIds = new Set();
-  for (const e of graph.edges) {
-    if (activeIds.has(e.from) && activeIds.has(e.to)) {
-      connectedIds.add(e.from);
-      connectedIds.add(e.to);
+// Available harness ids (kept in sync with cli/zo.js HARNESS_MAP and server CLI_HARNESS_COMMANDS)
+const HARNESS_OPTIONS = [
+  { id: 'mock',        label: '⬡ Simulator (test only)', tooltip: 'Test-only harness. Produces synthetic agent output to validate the ZAF pipeline without consuming AI credits. Not a real AI.' },
+  { id: 'claude-code', label: 'Claude Code CLI (interactive — requires terminal)' },
+  { id: 'codex',       label: 'OpenAI Codex CLI (interactive — requires terminal)' },
+  { id: 'gemini-cli',  label: 'Gemini CLI (interactive — requires terminal)' },
+];
+
+function displayHarness(h) { return h === 'mock' ? 'Simulator' : h; }
+
+// Merge static harness list with runtime custom harnesses (TKT-ZAF-0019)
+function getAllHarnessOptions() {
+  const custom = (STATE.config?.customHarnesses || []).map(h => ({
+    id: h.id, label: `${h.displayName} (custom)`, tooltip: `Custom harness: ${h.displayName}`,
+  }));
+  return [...HARNESS_OPTIONS, ...custom];
+}
+
+function agentHarnesses(role) {
+  // Multi-CLI agents: agent.harnesses (array) takes precedence over single .harness.
+  const a = STATE.config?.agents?.[role];
+  if (!a) return HARNESS_OPTIONS.map(h => h.id);
+  if (Array.isArray(a.harnesses) && a.harnesses.length) return a.harnesses;
+  if (a.harness) return [a.harness];
+  return HARNESS_OPTIONS.map(h => h.id);
+}
+
+function openLaunchPopover(ticket) {
+  const existing = document.getElementById('zaf-launch-modal');
+  if (existing) existing.remove();
+
+  const roles = (ticket.roles && ticket.roles.length) ? ticket.roles : Object.keys(STATE.config?.agents || { engineering: {} });
+  const defaultRole = roles[0] || 'engineering';
+  const a = STATE.config?.agents?.[defaultRole] || {};
+  const availableHarnesses = agentHarnesses(defaultRole);
+
+  const modal = document.createElement('div');
+  modal.id = 'zaf-launch-modal';
+  modal.className = 'zaf-launch-modal';
+  modal.innerHTML = `
+    <div class="zaf-launch-backdrop"></div>
+    <div class="zaf-launch-panel">
+      <div class="zaf-launch-header">
+        <div>
+          <div class="zaf-launch-title">▶ Launch agent on <span style="color:var(--indigo-400);font-family:'JetBrains Mono',monospace">${ticket.id}</span></div>
+          <div class="zaf-launch-sub">${safeHTML(ticket.title)}</div>
+        </div>
+        <button class="zaf-launch-close" id="zaf-launch-close" title="Close">✕</button>
+      </div>
+
+      <div class="zaf-launch-body">
+        <div class="zaf-field">
+          <label>Role / Agent</label>
+          <select id="zaf-launch-role">
+            ${Object.keys(STATE.config?.agents || {}).map(k => `<option value="${k}" ${k===defaultRole?'selected':''}>${STATE.config.agents[k].roleName} (${k})</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="zaf-field">
+          <label>CLI / Harness — pick which command-line agent runs this ticket</label>
+          <select id="zaf-launch-harness">
+            ${HARNESS_OPTIONS.map(h => {
+              const allowed = availableHarnesses.includes(h.id);
+              return `<option value="${h.id}" ${h.id === (a.harness || 'mock') ? 'selected' : ''} ${!allowed ? 'data-disabled="1"' : ''}>${h.label}${allowed ? '' : ' — not enabled for this agent'}</option>`;
+            }).join('')}
+          </select>
+          <div class="zaf-heartbeat-hint" id="zaf-harness-note">${a.harness === 'mock' ? 'Simulator streams synthetic telemetry into the multi-console — test-only, does not consume AI credits.' : 'Interactive CLIs need a real terminal — the dashboard will tell you the exact command to paste.'}</div>
+        </div>
+
+        <div class="zaf-field">
+          <label>Model</label>
+          <select id="zaf-launch-model">
+            ${(HARNESS_MODEL_IDS[a.harness || 'mock'] || []).map(m => `<option value="${m.id}" ${(a.modelId||'')===m.id?'selected':''}>${m.id} — ${m.label}</option>`).join('') || '<option value="">N/A</option>'}
+          </select>
+        </div>
+
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+          <div class="zaf-field">
+            <label>Reasoning</label>
+            <select id="zaf-launch-reasoning">
+              ${['high','medium','low'].map(r => `<option value="${r}" ${(a.reasoning||'medium')===r?'selected':''}>${r}</option>`).join('')}
+            </select>
+          </div>
+          <div class="zaf-field">
+            <label><span>Heartbeat</span><span class="zaf-heartbeat-val" id="zaf-launch-hbval">${a.heartbeat || 40} seconds</span></label>
+            <input type="range" id="zaf-launch-hb" min="5" max="300" step="5" value="${a.heartbeat || 40}" />
+          </div>
+        </div>
+
+        <div class="zaf-field">
+          <label>Per-ticket prompt addendum (optional)</label>
+          <textarea id="zaf-launch-prompt" rows="3" placeholder="Anything specific you want the agent to know before it starts on this ticket…"></textarea>
+        </div>
+      </div>
+
+      <div class="zaf-launch-footer">
+        <button class="zaf-btn secondary" id="zaf-launch-cancel">Cancel</button>
+        <button class="zaf-btn" id="zaf-launch-fire">▶ Launch subshell</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const roleSel    = modal.querySelector('#zaf-launch-role');
+  const harnessSel = modal.querySelector('#zaf-launch-harness');
+  const hbSlider   = modal.querySelector('#zaf-launch-hb');
+  const hbVal      = modal.querySelector('#zaf-launch-hbval');
+  const harnessNote = modal.querySelector('#zaf-harness-note');
+  const modelSel   = modal.querySelector('#zaf-launch-model');
+  const reasoningSel = modal.querySelector('#zaf-launch-reasoning');
+
+  const updateModelOptions = (harness, currentModelId) => {
+    if (!modelSel) return;
+    const models = HARNESS_MODEL_IDS[harness];
+    if (!models) {
+      modelSel.innerHTML = '<option value="">N/A</option>';
+      modelSel.disabled = true;
+    } else {
+      modelSel.disabled = false;
+      modelSel.innerHTML = models.map(m => `<option value="${m.id}" ${m.id===currentModelId?'selected':''}>${m.id} — ${m.label}</option>`).join('');
     }
+  };
+
+  const refreshFromRole = () => {
+    const k = roleSel.value;
+    const cfg = STATE.config?.agents?.[k] || {};
+    const allowed = agentHarnesses(k);
+    Array.from(harnessSel.options).forEach(opt => {
+      opt.disabled = !allowed.includes(opt.value);
+      opt.textContent = HARNESS_OPTIONS.find(h => h.id === opt.value)?.label + (opt.disabled ? ' — not enabled for this agent' : '');
+    });
+    if (cfg.harness && allowed.includes(cfg.harness)) harnessSel.value = cfg.harness;
+    else if (allowed.length) harnessSel.value = allowed[0];
+    updateModelOptions(harnessSel.value, cfg.modelId || cfg.customModel || cfg.model || '');
+    reasoningSel.value = cfg.reasoning || 'medium';
+    hbSlider.value = cfg.heartbeat || 40;
+    hbVal.textContent = `${hbSlider.value} seconds`;
+    updateNote();
+  };
+  const updateNote = () => {
+    if (harnessSel.value === 'mock') harnessNote.textContent = 'Simulator streams synthetic telemetry into the multi-console — you will see TOOL CALL / API REQUEST / DECISION lines appear live. Test-only, does not consume AI credits.';
+    else harnessNote.textContent = 'Interactive CLIs need a real terminal. Dashboard launches will print the exact paste-able command instead of streaming the live CLI.';
+  };
+
+  roleSel.addEventListener('change', refreshFromRole);
+  harnessSel.addEventListener('change', () => { updateNote(); updateModelOptions(harnessSel.value, modelSel?.value || ''); });
+  hbSlider.addEventListener('input', () => { hbVal.textContent = `${hbSlider.value} seconds`; });
+
+  const close = () => modal.remove();
+  modal.querySelector('#zaf-launch-close').addEventListener('click', close);
+  modal.querySelector('.zaf-launch-backdrop').addEventListener('click', close);
+  modal.querySelector('#zaf-launch-cancel').addEventListener('click', close);
+
+  modal.querySelector('#zaf-launch-fire').addEventListener('click', () => {
+    const role      = roleSel.value;
+    const harness   = harnessSel.value;
+    const modelId   = modelSel?.value || '';
+    const reasoning = reasoningSel.value;
+    const heartbeat = hbSlider.value;
+    const prompt    = modal.querySelector('#zaf-launch-prompt').value.trim();
+    close();
+    triggerAgentRun({
+      ticketId: ticket.id,
+      role, harness, modelId, reasoning, heartbeat,
+      repo: ticket.repoId || '',
+      promptAddendum: prompt,
+    });
+  });
+
+  setTimeout(() => modelInput.focus(), 50);
+}
+
+function triggerAgentRun(opts) {
+  const params = new URLSearchParams({
+    ticket: opts.ticketId,
+    role: opts.role,
+    harness: opts.harness,
+    modelId: opts.modelId || opts.model || '',
+    reasoning: opts.reasoning || '',
+    heartbeat: opts.heartbeat || '',
+    repo: opts.repo || '',
+  });
+
+  openConsolePanel();
+
+  if (typeof window !== 'undefined' && window.__TAURI__) {
+    window.__TAURI__.core.invoke('spawn_agent_run', {
+      ticketId: opts.ticketId,
+      role: opts.role,
+      harness: opts.harness,
+      model: opts.model || '',
+      reasoning: opts.reasoning || '',
+      heartbeat: opts.heartbeat || '',
+    }).catch(err => console.error('Tauri spawn failed', err));
   }
 
-  const nodes = graph.nodes.filter(n => connectedIds.has(n.id) && activeIds.has(n.id));
-  const edges = graph.edges.filter(e => connectedIds.has(e.from) && connectedIds.has(e.to));
+  fetch('/api/run', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ticket: opts.ticketId,
+      role: opts.role,
+      harness: opts.harness,
+      modelId: opts.modelId || opts.model || '',
+      reasoning: opts.reasoning || '',
+      heartbeat: opts.heartbeat || '',
+      repo: opts.repo || '',
+      promptAddendum: opts.promptAddendum || '',
+    }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      // Server emits process.start via SSE so the tab will appear there.
+      console.log('[ZAF] Spawned:', data);
+    })
+    .catch(err => alert('Failed to spawn agent: ' + err.message));
+}
 
+// =========================================================================
+// DEPENDENCY GRAPH (kept from baseline, slightly tightened)
+// =========================================================================
+
+function renderGraph(container) {
+  const graph = STATE.data.graph;
+  const active = getActiveTickets();
+  const activeIds = new Set(active.map(t => t.id));
+  const connected = new Set();
+  for (const e of graph.edges) {
+    if (activeIds.has(e.from) && activeIds.has(e.to)) { connected.add(e.from); connected.add(e.to); }
+  }
+  const nodes = graph.nodes.filter(n => connected.has(n.id) && activeIds.has(n.id));
+  const edges = graph.edges.filter(e => connected.has(e.from) && connected.has(e.to));
   const filterWs = STATE.filters.workstream || '';
   const wsOptions = [...new Set(active.map(t => t.workstream).filter(Boolean))].sort();
 
@@ -847,10 +1243,10 @@ function renderGraph(container) {
         <span style="font-size:15px;font-weight:700;color:var(--text-primary)">Dependency Graph</span>
         <select class="filter-select" id="graph-ws-filter">
           <option value="">All Workstreams</option>
-          ${wsOptions.map(ws => `<option value="${ws}" ${filterWs === ws ? 'selected':''}>${ws}</option>`).join('')}
+          ${wsOptions.map(ws => `<option value="${ws}" ${filterWs===ws?'selected':''}>${ws}</option>`).join('')}
         </select>
-        <span style="font-size:11px;color:var(--text-muted)">${nodes.length} connected nodes · ${edges.length} edges</span>
-        <span style="font-size:11px;color:var(--text-muted);font-style:italic">Drag nodes to pin · Double-click to release · Scroll to zoom</span>
+        <span style="font-size:11px;color:var(--text-muted)">${nodes.length} nodes · ${edges.length} edges</span>
+        <span style="font-size:11px;color:var(--text-muted);font-style:italic">Drag nodes · scroll to zoom · pan background</span>
         <button class="btn btn-secondary" id="graph-reset-zoom">Reset View</button>
       </div>
       <div class="graph-canvas-wrap" id="graph-wrap">
@@ -863,1361 +1259,2345 @@ function renderGraph(container) {
           <g id="graph-root"></g>
         </svg>
       </div>
-      <div class="graph-legend">
-        ${Object.entries(STATUS_COLORS).map(([s, c]) =>
-          `<div class="legend-item"><div class="legend-dot" style="background:${c}"></div>${STATUS_LABELS[s] || s}</div>`
-        ).join('')}
-      </div>
     </div>`;
-
-  container.querySelector('#graph-ws-filter').addEventListener('change', e => {
-    STATE.filters.workstream = e.target.value;
-    renderGraph(container);
-  });
-
+  container.querySelector('#graph-ws-filter').addEventListener('change', e => { STATE.filters.workstream = e.target.value; renderGraph(container); });
   drawDraggableGraph(nodes, edges, filterWs);
-
-  container.querySelector('#graph-reset-zoom').addEventListener('click', () => {
-    drawDraggableGraph(nodes, edges, filterWs);
-  });
+  container.querySelector('#graph-reset-zoom').addEventListener('click', () => drawDraggableGraph(nodes, edges, filterWs));
 }
 
 function drawDraggableGraph(allNodes, allEdges, wsFilter) {
   const svgEl = document.getElementById('graph-svg');
   const root  = document.getElementById('graph-root');
   if (!svgEl || !root) return;
-
   const nodes = wsFilter ? allNodes.filter(n => n.workstream === wsFilter) : allNodes;
   const nodeIds = new Set(nodes.map(n => n.id));
-  const edges   = allEdges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to));
-
-  if (nodes.length === 0) {
-    root.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#525970" font-size="14">No connected tickets in this workstream</text>`;
-    return;
-  }
-
-  const W = svgEl.clientWidth  || 900;
+  const edges = allEdges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to));
+  if (!nodes.length) { root.innerHTML = `<text x="50%" y="50%" text-anchor="middle" fill="#525970">No connected tickets</text>`; return; }
+  const W = svgEl.clientWidth || 900;
   const H = svgEl.clientHeight || 500;
-
-  const NODE_W = 120;
-  const NODE_H = 38;
-  const MARGIN = 60;
-
-  // Initial grid layout
+  const NODE_W = 120, NODE_H = 38, MARGIN = 60;
   const pos = {};
   nodes.forEach((n, i) => {
     const cols = Math.ceil(Math.sqrt(nodes.length * 1.5));
-    const row  = Math.floor(i / cols);
-    const col  = i % cols;
-    pos[n.id] = {
-      x: MARGIN + col * (NODE_W + 40) + (row % 2 === 0 ? 0 : (NODE_W + 40) / 2),
-      y: MARGIN + row * (NODE_H + 50),
-    };
+    const row = Math.floor(i/cols), col = i % cols;
+    pos[n.id] = { x: MARGIN + col*(NODE_W+40) + (row%2?0:(NODE_W+40)/2), y: MARGIN + row*(NODE_H+50) };
   });
-
-  // Spring simulation
   const vel = {};
-  nodes.forEach(n => { vel[n.id] = { x: 0, y: 0 }; });
-  for (let iter = 0; iter < 80; iter++) {
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i], b = nodes[j];
-        const dx = pos[b.id].x - pos[a.id].x;
-        const dy = pos[b.id].y - pos[a.id].y;
-        const dist  = Math.sqrt(dx*dx + dy*dy) || 1;
-        const force = 3000 / (dist*dist);
-        vel[a.id].x -= (dx/dist)*force; vel[a.id].y -= (dy/dist)*force;
-        vel[b.id].x += (dx/dist)*force; vel[b.id].y += (dy/dist)*force;
-      }
+  nodes.forEach(n => vel[n.id] = { x:0, y:0 });
+  for (let it=0; it<80; it++) {
+    for (let i=0; i<nodes.length; i++) for (let j=i+1; j<nodes.length; j++) {
+      const a = nodes[i], b = nodes[j];
+      const dx = pos[b.id].x - pos[a.id].x, dy = pos[b.id].y - pos[a.id].y;
+      const d = Math.sqrt(dx*dx+dy*dy) || 1;
+      const f = 3000 / (d*d);
+      vel[a.id].x -= dx/d*f; vel[a.id].y -= dy/d*f;
+      vel[b.id].x += dx/d*f; vel[b.id].y += dy/d*f;
     }
     for (const e of edges) {
-      if (!pos[e.from] || !pos[e.to]) continue;
-      const dx = pos[e.to].x - pos[e.from].x;
-      const dy = pos[e.to].y - pos[e.from].y;
-      const dist  = Math.sqrt(dx*dx + dy*dy) || 1;
-      const force = (dist - 180) * 0.05;
-      vel[e.from].x += (dx/dist)*force; vel[e.from].y += (dy/dist)*force;
-      vel[e.to].x   -= (dx/dist)*force; vel[e.to].y   -= (dy/dist)*force;
+      const dx = pos[e.to].x - pos[e.from].x, dy = pos[e.to].y - pos[e.from].y;
+      const d = Math.sqrt(dx*dx+dy*dy) || 1;
+      const f = (d - 180) * 0.05;
+      vel[e.from].x += dx/d*f; vel[e.from].y += dy/d*f;
+      vel[e.to].x   -= dx/d*f; vel[e.to].y   -= dy/d*f;
     }
-    for (const n of nodes) {
-      vel[n.id].x *= 0.8; vel[n.id].y *= 0.8;
-      pos[n.id].x  += vel[n.id].x;
-      pos[n.id].y  += vel[n.id].y;
-    }
+    for (const n of nodes) { vel[n.id].x*=0.8; vel[n.id].y*=0.8; pos[n.id].x+=vel[n.id].x; pos[n.id].y+=vel[n.id].y; }
   }
+  let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+  for (const n of nodes) { minX=Math.min(minX,pos[n.id].x); minY=Math.min(minY,pos[n.id].y); maxX=Math.max(maxX,pos[n.id].x+NODE_W); maxY=Math.max(maxY,pos[n.id].y+NODE_H); }
+  const pad = 40;
+  const scale = Math.min((W-pad*2)/((maxX-minX)||1), (H-pad*2)/((maxY-minY)||1), 1.2);
+  for (const n of nodes) { pos[n.id].x = pad + (pos[n.id].x-minX)*scale; pos[n.id].y = pad + (pos[n.id].y-minY)*scale; }
 
-  // Normalize to viewport
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const n of nodes) {
-    minX = Math.min(minX, pos[n.id].x);
-    minY = Math.min(minY, pos[n.id].y);
-    maxX = Math.max(maxX, pos[n.id].x + NODE_W);
-    maxY = Math.max(maxY, pos[n.id].y + NODE_H);
-  }
-  const pad    = 40;
-  const scaleX = (W - pad*2) / ((maxX - minX) || 1);
-  const scaleY = (H - pad*2) / ((maxY - minY) || 1);
-  const scale  = Math.min(scaleX, scaleY, 1.2);
-  for (const n of nodes) {
-    pos[n.id].x = pad + (pos[n.id].x - minX) * scale;
-    pos[n.id].y = pad + (pos[n.id].y - minY) * scale;
-  }
-
-  // Pinned node state (survives re-renders within session)
-  const pinned = {};
-
-  // ── SVG state ─────────────────────────────────────────────────
-  let panX = 0, panY = 0, zoom = 1;
-  let isPanning = false, panStartX = 0, panStartY = 0;
-
-  function applyTransform() {
-    root.setAttribute('transform', `translate(${panX},${panY}) scale(${zoom})`);
-  }
-
-  // ── Render ────────────────────────────────────────────────────
+  let panX=0, panY=0, zoom=1, isPanning=false, panStartX=0, panStartY=0;
+  function apply() { root.setAttribute('transform', `translate(${panX},${panY}) scale(${zoom})`); }
   function render() {
     const edgesHtml = edges.map(e => {
-      const from = pos[e.from], to = pos[e.to];
-      if (!from || !to) return '';
-      const x1 = from.x + NODE_W/2, y1 = from.y + NODE_H;
-      const x2 = to.x   + NODE_W/2, y2 = to.y;
-      const my = (y1 + y2) / 2;
-      return `<path class="graph-edge" data-from="${e.from}" data-to="${e.to}"
-        d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}"
-        stroke="${statusColor(STATE.ticketMap[e.from]?.status || 'OPEN')}" />`;
+      const a=pos[e.from], b=pos[e.to];
+      const x1=a.x+NODE_W/2, y1=a.y+NODE_H, x2=b.x+NODE_W/2, y2=b.y, my=(y1+y2)/2;
+      return `<path class="graph-edge" data-from="${e.from}" data-to="${e.to}" d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}" stroke="${statusColor(STATE.ticketMap[e.from]?.status||'OPEN')}" />`;
     }).join('');
-
     const nodesHtml = nodes.map(n => {
-      const p     = pos[n.id];
-      if (!p) return '';
-      const color = statusColor(n.status);
-      const title = n.title.length > 20 ? n.title.substring(0, 18) + '…' : n.title;
-      const pin   = pinned[n.id] ? `<circle cx="${NODE_W - 8}" cy="8" r="3" fill="${color}" opacity="0.8"/>` : '';
-      return `
-        <g class="graph-node" transform="translate(${p.x},${p.y})" data-id="${n.id}">
-          <rect class="graph-node-rect" width="${NODE_W}" height="${NODE_H}"
-            fill="${color}22" stroke="${color}" stroke-width="1.5" />
-          <text class="graph-node-id" x="6" y="13">${n.id}</text>
-          <text class="graph-node-label" x="6" y="28">${safeHTML(title)}</text>
-          ${pin}
-        </g>`;
+      const p=pos[n.id], c=statusColor(n.status), title = n.title.length > 20 ? n.title.substring(0,18) + '…' : n.title;
+      return `<g class="graph-node" transform="translate(${p.x},${p.y})" data-id="${n.id}">
+        <rect class="graph-node-rect" width="${NODE_W}" height="${NODE_H}" fill="${c}22" stroke="${c}" stroke-width="1.5"/>
+        <text class="graph-node-id" x="6" y="13">${n.id}</text>
+        <text class="graph-node-label" x="6" y="28">${safeHTML(title)}</text></g>`;
     }).join('');
-
     root.innerHTML = edgesHtml + nodesHtml;
-    applyTransform();
-    bindNodeInteractions();
+    apply();
+    bindNodeDrag();
   }
-
-  // ── Update edge positions live ────────────────────────────────
   function updateEdges() {
-    root.querySelectorAll('.graph-edge').forEach(path => {
-      const from = pos[path.dataset.from];
-      const to   = pos[path.dataset.to];
-      if (!from || !to) return;
-      const x1 = from.x + NODE_W/2, y1 = from.y + NODE_H;
-      const x2 = to.x   + NODE_W/2, y2 = to.y;
-      const my = (y1 + y2) / 2;
-      path.setAttribute('d', `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
+    root.querySelectorAll('.graph-edge').forEach(p => {
+      const a=pos[p.dataset.from], b=pos[p.dataset.to];
+      const x1=a.x+NODE_W/2, y1=a.y+NODE_H, x2=b.x+NODE_W/2, y2=b.y, my=(y1+y2)/2;
+      p.setAttribute('d', `M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`);
     });
   }
-
-  // ── Node drag interactions ────────────────────────────────────
-  function bindNodeInteractions() {
+  function bindNodeDrag() {
     root.querySelectorAll('.graph-node').forEach(el => {
       const id = el.dataset.id;
-      let isDragging = false, startClientX = 0, startClientY = 0, startPosX = 0, startPosY = 0;
-
+      let dragging=false, sx=0, sy=0, sPosX=0, sPosY=0;
       el.addEventListener('mousedown', e => {
-        e.stopPropagation();
-        isDragging  = true;
-        startClientX = e.clientX;
-        startClientY = e.clientY;
-        startPosX   = pos[id].x;
-        startPosY   = pos[id].y;
-        el.style.cursor = 'grabbing';
-        e.preventDefault();
-      });
-
-      el.addEventListener('dblclick', e => {
-        e.stopPropagation();
-        delete pinned[id];
-        el.querySelector('circle')?.remove();
-      });
-
-      el.addEventListener('click', e => {
-        if (Math.abs(e.clientX - startClientX) < 5 && Math.abs(e.clientY - startClientY) < 5) {
-          openDetailPanel(id);
-        }
-      });
-
-      // Per-node mousemove / mouseup on window
-      function onMouseMove(e) {
-        if (!isDragging) return;
-        const dx = (e.clientX - startClientX) / zoom;
-        const dy = (e.clientY - startClientY) / zoom;
-        pos[id].x = startPosX + dx;
-        pos[id].y = startPosY + dy;
-        el.setAttribute('transform', `translate(${pos[id].x},${pos[id].y})`);
-        updateEdges();
-      }
-
-      function onMouseUp(e) {
-        if (!isDragging) return;
-        isDragging = false;
-        el.style.cursor = 'pointer';
-        const moved = Math.abs(e.clientX - startClientX) > 5 || Math.abs(e.clientY - startClientY) > 5;
-        if (moved) {
-          pinned[id] = true;
-          // Add pin dot
-          const existingPin = el.querySelector('circle');
-          if (!existingPin) {
-            const color = statusColor(STATE.ticketMap[id]?.status || 'OPEN');
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('cx', NODE_W - 8);
-            circle.setAttribute('cy', 8);
-            circle.setAttribute('r', 3);
-            circle.setAttribute('fill', color);
-            circle.setAttribute('opacity', '0.8');
-            el.appendChild(circle);
-          }
-        }
-        window.removeEventListener('mousemove', onMouseMove);
-        window.removeEventListener('mouseup', onMouseUp);
-      }
-
-      el.addEventListener('mousedown', () => {
-        window.addEventListener('mousemove', onMouseMove);
-        window.addEventListener('mouseup', onMouseUp);
+        e.stopPropagation(); dragging=true;
+        sx=e.clientX; sy=e.clientY; sPosX=pos[id].x; sPosY=pos[id].y; el.style.cursor='grabbing'; e.preventDefault();
+        function mm(ev) { if (!dragging) return; pos[id].x = sPosX + (ev.clientX-sx)/zoom; pos[id].y = sPosY + (ev.clientY-sy)/zoom; el.setAttribute('transform', `translate(${pos[id].x},${pos[id].y})`); updateEdges(); }
+        function mu(ev) { dragging=false; el.style.cursor='pointer'; window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', mu); if (Math.abs(ev.clientX-sx)<5 && Math.abs(ev.clientY-sy)<5) openDetailPanel(id); }
+        window.addEventListener('mousemove', mm); window.addEventListener('mouseup', mu);
       });
     });
   }
-
-  // ── Background pan ────────────────────────────────────────────
-  svgEl.addEventListener('mousedown', e => {
-    if (e.target.closest('.graph-node')) return;
-    isPanning  = true;
-    panStartX  = e.clientX - panX;
-    panStartY  = e.clientY - panY;
-    svgEl.style.cursor = 'grabbing';
-  });
-
-  window.addEventListener('mousemove', e => {
-    if (!isPanning) return;
-    panX = e.clientX - panStartX;
-    panY = e.clientY - panStartY;
-    applyTransform();
-  });
-
-  window.addEventListener('mouseup', () => {
-    if (!isPanning) return;
-    isPanning = false;
-    svgEl.style.cursor = 'grab';
-  });
-
-  // ── Scroll zoom (around cursor) ───────────────────────────────
+  svgEl.addEventListener('mousedown', e => { if (e.target.closest('.graph-node')) return; isPanning=true; panStartX=e.clientX-panX; panStartY=e.clientY-panY; svgEl.style.cursor='grabbing'; });
+  window.addEventListener('mousemove', e => { if (!isPanning) return; panX=e.clientX-panStartX; panY=e.clientY-panStartY; apply(); });
+  window.addEventListener('mouseup', () => { isPanning=false; svgEl.style.cursor='grab'; });
   svgEl.addEventListener('wheel', e => {
     e.preventDefault();
-    const oldZoom = zoom;
-    zoom = Math.max(0.2, Math.min(4, zoom + e.deltaY * -0.001));
-    const rect  = svgEl.getBoundingClientRect();
-    const mx    = e.clientX - rect.left;
-    const my    = e.clientY - rect.top;
-    panX = mx - (mx - panX) * (zoom / oldZoom);
-    panY = my - (my - panY) * (zoom / oldZoom);
-    applyTransform();
-  }, { passive: false });
-
+    const oldZoom=zoom; zoom = Math.max(0.2, Math.min(4, zoom + e.deltaY*-0.001));
+    const r=svgEl.getBoundingClientRect(), mx=e.clientX-r.left, my=e.clientY-r.top;
+    panX = mx - (mx-panX)*(zoom/oldZoom);
+    panY = my - (my-panY)*(zoom/oldZoom);
+    apply();
+  }, { passive:false });
   render();
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   VIEW: ARCHIVE
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// VIEW: ARCHIVE
+// =========================================================================
 
 function renderArchive(container) {
   let tickets = [...getArchivedTickets()];
-  const searchVal = STATE.filters.search || '';
-
-  if (searchVal) {
-    const q = searchVal.toLowerCase();
-    tickets = tickets.filter(t =>
-      t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q)
-    );
+  const sv = STATE.filters.search || '';
+  if (sv) {
+    const q = sv.toLowerCase();
+    tickets = tickets.filter(t => t.id.toLowerCase().includes(q) || t.title.toLowerCase().includes(q));
   }
-
   const { col, dir } = STATE.archiveSort;
-  tickets.sort((a, b) => {
+  tickets.sort((a,b) => {
     let va = a[col] || '', vb = b[col] || '';
     if (col === 'id') {
-      va = parseInt(va.replace(/[^0-9]/g, '')) || 0;
-      vb = parseInt(vb.replace(/[^0-9]/g, '')) || 0;
-      return dir === 'asc' ? va - vb : vb - va;
+      va = parseInt(va.replace(/[^0-9]/g,''))||0;
+      vb = parseInt(vb.replace(/[^0-9]/g,''))||0;
+      return dir==='asc' ? va-vb : vb-va;
     }
-    return dir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+    return dir==='asc' ? va.localeCompare(vb) : vb.localeCompare(va);
   });
-
-  const sortIcon = (c) => {
-    if (STATE.archiveSort.col !== c) return `<span class="sort-icon">↕</span>`;
-    return `<span class="sort-icon">${STATE.archiveSort.dir === 'asc' ? '↑' : '↓'}</span>`;
-  };
-
-  const rows = tickets.map(t => `
-    <tr data-id="${t.id}" class="archive-row">
+  const sortIcon = c => STATE.archiveSort.col!==c ? `<span class="sort-icon">↕</span>` : `<span class="sort-icon">${STATE.archiveSort.dir==='asc'?'↑':'↓'}</span>`;
+  const rows = tickets.map(t => {
+    const voided = t.status === 'VOIDED';
+    const rowStyle = voided ? ' style="text-decoration:line-through;opacity:0.55"' : '';
+    return `<tr data-id="${t.id}" class="archive-row"${rowStyle}>
       <td class="td-id">${t.id}</td>
       <td class="td-title">${safeHTML(t.title)}</td>
       <td>${wsBadge(t.workstream)}</td>
       <td>${statusBadge(t.status)}</td>
-      ${!STATE.selectedRepo ? `<td class="td-repo">${safeHTML(t.repoId || '—')}</td>` : ''}
+      ${!STATE.selectedRepo ? `<td class="td-repo">${safeHTML(t.repoId||'—')}</td>` : ''}
       <td class="td-date">${formatDate(t.updated)}</td>
-    </tr>`).join('');
-
+    </tr>`;
+  }).join('');
   container.innerHTML = `
     <div class="view-archive fade-in">
       <div class="section-header">
         <h1>Archive</h1>
-        <span class="section-meta">${tickets.length} of ${getArchivedTickets().length} archived tickets</span>
+        <span class="section-meta">${tickets.length} of ${getArchivedTickets().length} archived</span>
       </div>
-
-      <div class="board-toolbar" style="background:transparent; padding:0; border:none; margin-bottom:12px">
-        <input class="search-input" id="archive-search" type="text" placeholder="Search archived tickets…" value="${safeHTML(searchVal)}" />
+      <div class="board-toolbar" style="background:transparent;padding:0;border:none;margin-bottom:12px">
+        <input class="search-input" id="archive-search" type="text" placeholder="Search archived tickets…" value="${safeHTML(sv)}" />
       </div>
-
       <div class="archive-table-wrap">
         <table class="archive-table">
-          <thead>
-            <tr>
-              <th data-col="id">ID${sortIcon('id')}</th>
-              <th data-col="title">Title${sortIcon('title')}</th>
-              <th data-col="workstream">Workstream${sortIcon('workstream')}</th>
-              <th data-col="status">Status${sortIcon('status')}</th>
-              ${!STATE.selectedRepo ? `<th data-col="repoId">Repo${sortIcon('repoId')}</th>` : ''}
-              <th data-col="updated">Updated${sortIcon('updated')}</th>
-            </tr>
-          </thead>
+          <thead><tr>
+            <th data-col="id">ID${sortIcon('id')}</th>
+            <th data-col="title">Title${sortIcon('title')}</th>
+            <th data-col="workstream">Workstream${sortIcon('workstream')}</th>
+            <th data-col="status">Status${sortIcon('status')}</th>
+            ${!STATE.selectedRepo ? `<th data-col="repoId">Repo${sortIcon('repoId')}</th>` : ''}
+            <th data-col="updated">Updated${sortIcon('updated')}</th>
+          </tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
     </div>`;
-
-  container.querySelectorAll('th[data-col]').forEach(th => {
-    th.addEventListener('click', () => {
-      const c = th.dataset.col;
-      if (STATE.archiveSort.col === c) {
-        STATE.archiveSort.dir = STATE.archiveSort.dir === 'asc' ? 'desc' : 'asc';
-      } else {
-        STATE.archiveSort = { col: c, dir: 'asc' };
-      }
-      renderArchive(container);
-    });
-  });
-
-  container.querySelector('#archive-search').addEventListener('input', e => {
-    STATE.filters.search = e.target.value;
+  container.querySelectorAll('th[data-col]').forEach(th => th.addEventListener('click', () => {
+    const c = th.dataset.col;
+    if (STATE.archiveSort.col === c) STATE.archiveSort.dir = STATE.archiveSort.dir === 'asc' ? 'desc' : 'asc';
+    else STATE.archiveSort = { col:c, dir:'asc' };
     renderArchive(container);
-  });
-
-  container.querySelectorAll('.archive-row[data-id]').forEach(row => {
-    row.addEventListener('click', () => openDetailPanel(row.dataset.id));
-  });
+  }));
+  container.querySelector('#archive-search').addEventListener('input', e => { STATE.filters.search = e.target.value; renderArchive(container); });
+  container.querySelectorAll('.archive-row[data-id]').forEach(row => row.addEventListener('click', () => openDetailPanel(row.dataset.id)));
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   VIEW: PROGRAMME DEEP DIVE
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// VIEW: PROGRAMME DEEP DIVE
+// =========================================================================
 
 function renderProgramme(container) {
-  const progs = getProgrammes();
-  const programme = progs?.[0];
+  const allProgs = STATE.data?.programmes || [];
+  const progs = STATE.selectedRepo
+    ? allProgs.filter(p => p.repoId === STATE.selectedRepo)
+    : allProgs;
 
-  if (!programme) {
-    container.innerHTML = `<div style="padding:40px; color:var(--text-muted)">No programme data found for selected repo.</div>`;
+  if (!progs.length) {
+    container.innerHTML = `
+      <div class="view-deep-dive fade-in">
+        <div class="section-header">
+          <h1>Programmes</h1>
+          <button id="new-programme-btn" class="zaf-btn" style="margin-left:auto">+ New Programme</button>
+        </div>
+        <div style="padding:40px;color:var(--text-muted)">No programme data found for selected repo.</div>
+      </div>`;
+    bindNewProgrammeBtn(container);
     return;
   }
 
-  const phaseGateStatus = { COMPLETE: '✓ Complete', ACTIVE: '◉ Active', PENDING: '○ Pending' };
+  // Group by programme id (merge if same id appears across repos in All-Repos mode)
+  const progMap = new Map();
+  for (const p of progs) {
+    const key = p.id || p.title || p.repoId;
+    if (progMap.has(key)) {
+      const existing = progMap.get(key);
+      existing.phases = [...(existing.phases || []), ...(p.phases || [])];
+      existing.workstreams = [...(existing.workstreams || []), ...(p.workstreams || [])];
+      existing.openQuestions = [...(existing.openQuestions || []), ...(p.openQuestions || [])];
+      if (p.repoId && !existing.repoIds) existing.repoIds = [existing.repoId, p.repoId];
+      else if (p.repoId && existing.repoIds) existing.repoIds.push(p.repoId);
+    } else {
+      progMap.set(key, { ...p });
+    }
+  }
 
-  const phasesHtml = programme.phases.map(ph => {
-    const gs = ph.gateStatus.toLowerCase();
-    return `
-      <div class="phase-card">
-        <div class="phase-dot ${gs}">${gs === 'complete' ? '✓' : gs === 'active' ? '◉' : '○'}</div>
+  const renderOneProg = (programme) => {
+    const phasesHtml = (programme.phases || []).map(ph => {
+      const gs = (ph.gateStatus || 'pending').toLowerCase();
+      return `<div class="phase-card">
+        <div class="phase-dot ${gs}">${gs==='complete'?'✓':gs==='active'?'◉':'○'}</div>
         <div class="phase-body">
           <div class="phase-body-top">
             <div class="phase-title">${safeHTML(ph.title)}</div>
-            <div class="phase-status-badge ${gs}">${phaseGateStatus[ph.gateStatus] || ph.gateStatus}</div>
+            <div class="phase-status-badge ${gs}">${ph.gateStatus || 'PENDING'}</div>
           </div>
           ${ph.objective ? `<div class="phase-objective">${safeHTML(ph.objective)}</div>` : ''}
         </div>
       </div>`;
-  }).join('');
-
-  const wsCardsHtml = programme.workstreams.map(ws => {
-    const color = wsColor(ws.id);
-    return `
-      <div class="ws-deep-card">
-        <div class="ws-deep-header">
-          <div class="ws-deep-id" style="color:${color}; background:${color}18">${ws.id}</div>
-        </div>
+    }).join('');
+    const wsCardsHtml = (programme.workstreams || []).map(ws => {
+      const c = wsColor(ws.id);
+      return `<div class="ws-deep-card">
+        <div class="ws-deep-header"><div class="ws-deep-id" style="color:${c};background:${c}18">${ws.id}</div></div>
         <div class="ws-deep-goal">${safeHTML(ws.goal)}</div>
         ${ws.currentState ? `<div class="ws-deep-state">Current: ${safeHTML(ws.currentState)}</div>` : ''}
       </div>`;
-  }).join('');
-
-  const oqRows = programme.openQuestions.map(oq => {
-    const answered = oq.status === 'ANSWERED';
+    }).join('');
+    const openQs = (programme.openQuestions || []);
+    const oqRows = openQs.map(oq => {
+      const answered = oq.status === 'ANSWERED';
+      return `<tr><td style="font-family:monospace;font-size:11px;color:var(--text-muted);white-space:nowrap">${oq.id}</td><td>${safeHTML(oq.question)}</td><td><span class="status-badge ${answered?'status-DONE':'status-OPEN'}">${answered?'Answered':'Open'}</span></td></tr>`;
+    }).join('');
+    const repoTag = !STATE.selectedRepo && programme.repoId ? `<span class="tag tag-repo" style="margin-left:8px">${safeHTML(programme.repoId)}</span>` : '';
     return `
-      <tr>
-        <td style="font-family:monospace;font-size:11px;color:var(--text-muted);white-space:nowrap">${oq.id}</td>
-        <td>${safeHTML(oq.question)}</td>
-        <td><span class="status-badge ${answered ? 'status-DONE' : 'status-OPEN'}">${answered ? 'Answered' : 'Open'}</span></td>
-      </tr>`;
-  }).join('');
+      <div class="deep-dive-section" style="margin-bottom:32px;border-bottom:1px solid var(--border-subtle);padding-bottom:24px">
+        <h2 style="display:flex;align-items:center;gap:8px">${safeHTML(programme.title)}${repoTag}</h2>
+        ${phasesHtml ? `<h3 style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 8px">Phase Gates</h3><div class="phase-timeline">${phasesHtml}</div>` : ''}
+        ${wsCardsHtml ? `<h3 style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 8px">Workstreams</h3>${wsCardsHtml}` : ''}
+        ${openQs.length ? `<h3 style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 8px">Open Questions</h3><table class="oq-table"><thead><tr><th>ID</th><th>Question</th><th>Status</th></tr></thead><tbody>${oqRows}</tbody></table>` : ''}
+      </div>`;
+  };
 
+  const allSections = [...progMap.values()].map(renderOneProg).join('');
   container.innerHTML = `
     <div class="view-deep-dive fade-in">
       <div class="section-header">
-        <h1>${safeHTML(programme.title)}</h1>
+        <h1>Programmes${!STATE.selectedRepo ? ' — All Repos' : ''}</h1>
+        <button id="new-programme-btn" class="zaf-btn" style="margin-left:auto">+ New Programme</button>
       </div>
-
-      <div class="deep-dive-section">
-        <h2>Phase Gates</h2>
-        <div class="phase-timeline">${phasesHtml}</div>
-      </div>
-
-      <div class="deep-dive-section">
-        <h2>Workstreams</h2>
-        ${wsCardsHtml || '<div style="color:var(--text-muted)">No workstreams defined.</div>'}
-      </div>
-
-      ${programme.openQuestions.length > 0 ? `
-        <div class="deep-dive-section">
-          <h2>Open Questions</h2>
-          <table class="oq-table">
-            <thead><tr><th>ID</th><th>Question</th><th>Status</th></tr></thead>
-            <tbody>${oqRows}</tbody>
-          </table>
-        </div>` : ''}
+      ${allSections}
     </div>`;
+  bindNewProgrammeBtn(container);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   BOOT
-   ═══════════════════════════════════════════════════════════════ */
-
-document.addEventListener('DOMContentLoaded', init);
-
-/* ═══════════════════════════════════════════════════════════════
-   PHASE 4: TELEMETRY CONSOLE DRAWER & TAURI IPC CONTROLLERS
-   ═══════════════════════════════════════════════════════════════ */
-
-function bindRunAgentButton() {
-  const btn = document.getElementById('detail-run-btn');
+function bindNewProgrammeBtn(container) {
+  const btn = container.querySelector('#new-programme-btn');
   if (!btn) return;
-  btn.addEventListener('click', () => {
-    const ticketId = STATE.selectedTicketId;
-    if (!ticketId) return;
-    const t = STATE.ticketMap[ticketId];
-    const role = (t.roles && t.roles[0]) || 'engineering';
-    const harness = 'mock'; // Defaults to mock harness execution
-    
-    triggerAgentRun(ticketId, role, harness);
+  btn.addEventListener('click', () => openNewProgrammeModal());
+}
+
+function openNewProgrammeModal() {
+  const existing = document.getElementById('zaf-programme-modal');
+  if (existing) existing.remove();
+
+  const repos = STATE.data?.repos || [];
+  const repoOpts = repos.map(r => `<option value="${r.id}">${safeHTML(r.label || r.id)}</option>`).join('');
+
+  const modal = document.createElement('div');
+  modal.id = 'zaf-programme-modal';
+  modal.className = 'zaf-launch-modal';
+  modal.innerHTML = `
+    <div class="zaf-launch-backdrop"></div>
+    <div class="zaf-launch-panel" style="max-width:440px">
+      <div class="zaf-launch-header">
+        <span class="zaf-launch-title">New Programme</span>
+        <button class="zaf-launch-close" id="prog-modal-close">✕</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;padding:16px 0">
+        <div class="zaf-field"><label>Programme ID (e.g. PROG-ZAF-002)</label>
+          <input class="zaf-input" id="prog-id" type="text" placeholder="PROG-ZAF-002" /></div>
+        <div class="zaf-field"><label>Title</label>
+          <input class="zaf-input" id="prog-title" type="text" placeholder="Phase title" /></div>
+        <div class="zaf-field"><label>Description (optional)</label>
+          <input class="zaf-input" id="prog-desc" type="text" placeholder="Short description" /></div>
+        <div class="zaf-field"><label>Phase label (e.g. P9)</label>
+          <input class="zaf-input" id="prog-phase" type="text" placeholder="P9" /></div>
+        <div class="zaf-field"><label>Default Workstream</label>
+          <input class="zaf-input" id="prog-ws" type="text" placeholder="WS-UX" /></div>
+        <div class="zaf-field"><label>Target Repo</label>
+          <select class="zaf-input" id="prog-repo">${repoOpts}</select></div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
+        <button class="zaf-btn secondary" id="prog-modal-cancel">Cancel</button>
+        <button class="zaf-btn" id="prog-modal-submit">Create Programme</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  modal.querySelector('#prog-modal-close').addEventListener('click', () => modal.remove());
+  modal.querySelector('#prog-modal-cancel').addEventListener('click', () => modal.remove());
+  modal.querySelector('.zaf-launch-backdrop').addEventListener('click', () => modal.remove());
+
+  // Auto-suggest programme ID
+  const existing2 = (STATE.data?.programmes || []).map(p => p.id).filter(Boolean);
+  const lastNum = existing2.reduce((max, id) => {
+    const m = id.match(/(\d+)$/); return m ? Math.max(max, parseInt(m[1])) : max;
+  }, 0);
+  modal.querySelector('#prog-id').value = `PROG-ZAF-${String(lastNum + 1).padStart(3, '0')}`;
+
+  modal.querySelector('#prog-modal-submit').addEventListener('click', async () => {
+    const payload = {
+      programmeId: modal.querySelector('#prog-id').value.trim(),
+      title: modal.querySelector('#prog-title').value.trim(),
+      description: modal.querySelector('#prog-desc').value.trim(),
+      phase: modal.querySelector('#prog-phase').value.trim(),
+      workstream: modal.querySelector('#prog-ws').value.trim(),
+      repo: modal.querySelector('#prog-repo').value,
+    };
+    if (!payload.title) { alert('Title is required'); return; }
+    const r = await fetch('/api/programme/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) { alert('Create failed: HTTP ' + r.status); return; }
+    modal.remove();
   });
 }
 
-function triggerAgentRun(ticketId, role, harness) {
-  openConsoleDrawer();
-  
-  const agentCfg = (STATE.config && STATE.config.agents && STATE.config.agents[role]) || {};
-  const model = agentCfg.model || '';
-  const reasoning = agentCfg.reasoning || '';
-  const heartbeat = agentCfg.heartbeat || '';
+// =========================================================================
+// NEW REPO WIZARD (TKT-ZAF-0028)
+// =========================================================================
 
-  appendConsoleLog(`\n[ZAF Control] Spawning sovereign subshell for ${ticketId} [Role: ${role}, Harness: ${harness}]...`, 'system');
-  if (model) appendConsoleLog(`[ZAF Control] Target Model: ${model} | Reasoning: ${reasoning} | Heartbeat: ${heartbeat}s`, 'system');
-  
-  // Detect Tauri or fallback to HTTP REST path
-  if (typeof window !== 'undefined' && window.__TAURI__ !== undefined) {
-    appendConsoleLog(`[ZAF Control] Tauri native environment detected. Invoking IPC run-hook...`, 'system');
-    window.__TAURI__.core.invoke('spawn_agent_run', { ticketId, role, harness, model, reasoning, heartbeat })
-      .then(() => {
-        appendConsoleLog(`[ZAF Control] Tauri agent run request sent successfully.`, 'system');
-      })
-      .catch((err) => {
-        appendConsoleLog(`[ZAF Control] Tauri IPC error: ${err}`, 'stderr');
-      });
-  } else {
-    appendConsoleLog(`[ZAF Control] Web browser detected. Dispatching API telemetry trigger...`, 'system');
-    fetch(`/api/run?ticket=${ticketId}&role=${role}&harness=${harness}&model=${model}&reasoning=${reasoning}&heartbeat=${heartbeat}`)
-      .then(res => res.json())
-      .then(data => {
-        appendConsoleLog(`[ZAF Control] Telemetry server response: ${JSON.stringify(data)}`, 'system');
-      })
-      .catch(err => {
-        appendConsoleLog(`[ZAF Control] Failed dispatching run request: ${err.message}`, 'stderr');
-      });
-  }
+function bindNewRepoButton() {
+  document.getElementById('sidebar-new-repo')?.addEventListener('click', openNewRepoWizard);
 }
 
-function bindConsoleControls() {
-  document.getElementById('console-close-btn')?.addEventListener('click', closeConsoleDrawer);
-  document.getElementById('console-clear-btn')?.addEventListener('click', clearConsoleLogs);
-}
+function openNewRepoWizard() {
+  const existing = document.getElementById('zaf-new-repo-modal');
+  if (existing) existing.remove();
 
-function openConsoleDrawer() {
-  const drawer = document.getElementById('console-drawer');
-  const dot = document.getElementById('console-dot');
-  if (drawer) drawer.classList.add('active');
-  if (dot) dot.classList.add('active');
-}
+  const reposRoot = '/repos'; // server will use REPOS_ROOT; we just show the default path hint
+  const agents = STATE.config?.agents || {};
+  const agentKeys = Object.keys(agents);
+  const harnesses = ['mock', 'claude-code', 'codex', 'gemini-cli'];
 
-function closeConsoleDrawer() {
-  const drawer = document.getElementById('console-drawer');
-  const dot = document.getElementById('console-dot');
-  if (drawer) drawer.classList.remove('active');
-  if (dot) dot.classList.remove('active');
-}
+  const modal = document.createElement('div');
+  modal.id = 'zaf-new-repo-modal';
+  modal.className = 'zaf-launch-modal';
+  modal.innerHTML = `
+    <div class="zaf-launch-backdrop"></div>
+    <div class="zaf-launch-panel" style="width:600px;max-width:calc(100vw - 32px)">
+      <div class="zaf-launch-header">
+        <div>
+          <div class="zaf-launch-title">+ New Repository</div>
+          <div class="zaf-launch-sub">Create and scaffold a new project repository</div>
+        </div>
+        <button class="zaf-launch-close" id="nr-close">✕</button>
+      </div>
+      <div class="zaf-launch-body" id="nr-body">
+        <!-- Step 1 rendered here -->
+      </div>
+      <div class="zaf-launch-footer" id="nr-footer"></div>
+    </div>`;
+  document.body.appendChild(modal);
 
-function clearConsoleLogs() {
-  const content = document.getElementById('console-log-content');
-  if (content) content.innerHTML = `> [ZAF Control] Telemetry console cleared.`;
-}
+  const body = modal.querySelector('#nr-body');
+  const footer = modal.querySelector('#nr-footer');
+  const close = () => modal.remove();
 
-function appendConsoleLog(text, type = 'stdout') {
-  const content = document.getElementById('console-log-content');
-  if (!content) return;
-  
-  const line = document.createElement('div');
-  let traceType = type;
-  
-  // Detect Paperclip-style traceability headers in logs
-  if (text.includes('[TOOL CALL]') || text.includes('🛠️') || text.includes('Executing tool') || text.includes('executing tool') || text.includes('call_tool')) {
-    traceType = 'tool-call';
-  } else if (text.includes('[API REQUEST]') || text.includes('🌐') || text.includes('fetch') || text.includes('HTTP request')) {
-    traceType = 'api-request';
-  } else if (text.includes('[DECISION]') || text.includes('🧠') || text.includes('Decision') || text.includes('planning') || text.includes('goal')) {
-    traceType = 'decision';
-  }
-  
-  line.className = `console-line ${traceType}`;
-  line.textContent = `> ${text}`;
-  content.appendChild(line);
-  content.scrollTop = content.scrollHeight;
-}
+  modal.querySelector('#nr-close').addEventListener('click', close);
+  modal.querySelector('.zaf-launch-backdrop').addEventListener('click', close);
 
-function registerTauriListeners() {
-  if (typeof window !== 'undefined' && window.__TAURI__ !== undefined) {
-    // Listen for live events emitted from Rust backend
-    window.__TAURI__.event.listen('agent-log', (event) => {
-      openConsoleDrawer();
-      appendConsoleLog(event.payload, 'stdout');
+  // Step state
+  const form = { name:'', displayName:'', localPath:'', description:'', remoteUrl:'', mode:'manual', templateName:'zaf-standard', agentRole: agentKeys[0] || 'engineering', agentHarness:'claude-code', scaffoldInstructions:'' };
+
+  function renderStep1() {
+    body.innerHTML = `
+      <div class="wizard-steps">
+        <div class="wizard-step active">1 · Repo Info</div>
+        <div class="wizard-step">2 · Scaffold</div>
+      </div>
+      <div class="zaf-field"><label>Repo name (slug)</label>
+        <input id="nr-name" placeholder="my-repo" value="${safeHTML(form.name)}" />
+      </div>
+      <div class="zaf-field"><label>Display name</label>
+        <input id="nr-displayname" placeholder="My Project" value="${safeHTML(form.displayName)}" />
+      </div>
+      <div class="zaf-field"><label>Local path</label>
+        <input id="nr-path" placeholder="Path will be set after you enter the name" value="${safeHTML(form.localPath)}" />
+      </div>
+      <div class="zaf-field"><label>Description</label>
+        <input id="nr-desc" placeholder="One-line description" value="${safeHTML(form.description)}" />
+      </div>
+      <div class="zaf-field"><label>GitHub remote URL (optional)</label>
+        <input id="nr-remote" placeholder="https://github.com/org/repo.git" value="${safeHTML(form.remoteUrl)}" />
+      </div>
+      <div class="zaf-field"><label>Scaffold mode</label>
+        <div class="scaffold-mode-toggle">
+          <label><input type="radio" name="nr-mode" value="manual" ${form.mode==='manual'?'checked':''}><span>Manual</span></label>
+          <label><input type="radio" name="nr-mode" value="cli-scaffold" ${form.mode==='cli-scaffold'?'checked':''}><span>Let an agent scaffold this</span></label>
+        </div>
+      </div>`;
+    footer.innerHTML = `
+      <button class="zaf-btn secondary" id="nr-cancel">Cancel</button>
+      <button class="zaf-btn" id="nr-step1-next">Next →</button>`;
+    footer.querySelector('#nr-cancel').addEventListener('click', close);
+
+    // Auto-fill path from name
+    const nameInput = body.querySelector('#nr-name');
+    const pathInput = body.querySelector('#nr-path');
+    nameInput.addEventListener('input', () => {
+      form.name = nameInput.value;
+      if (!form.localPath || form.localPath.endsWith('/' + form._prevName)) {
+        pathInput.value = form.name ? `C:/Users/LENOVO/Workspace/01_Repos/${form.name}` : '';
+        form.localPath = pathInput.value;
+      }
+      form._prevName = form.name;
+    });
+    pathInput.addEventListener('input', () => { form.localPath = pathInput.value; });
+
+    footer.querySelector('#nr-step1-next').addEventListener('click', () => {
+      form.name        = body.querySelector('#nr-name').value.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+      form.displayName = body.querySelector('#nr-displayname').value.trim();
+      form.localPath   = body.querySelector('#nr-path').value.trim();
+      form.description = body.querySelector('#nr-desc').value.trim();
+      form.remoteUrl   = body.querySelector('#nr-remote').value.trim();
+      form.mode        = body.querySelector('input[name="nr-mode"]:checked')?.value || 'manual';
+      if (!form.name)      { alert('Repo name is required'); return; }
+      if (!form.localPath) { alert('Local path is required'); return; }
+      renderStep2();
     });
   }
+
+  function renderStep2() {
+    body.innerHTML = `
+      <div class="wizard-steps">
+        <div class="wizard-step done">1 · Repo Info ✓</div>
+        <div class="wizard-step active">2 · Scaffold</div>
+      </div>
+      ${form.mode === 'manual' ? `
+        <div class="zaf-field"><label>Template</label>
+          <select id="nr-template">
+            <option value="minimal" ${form.templateName==='minimal'?'selected':''}>Minimal (git init + CLAUDE.md stub)</option>
+            <option value="zaf-standard" ${form.templateName==='zaf-standard'?'selected':''}>ZAF Standard (CLAUDE.md, CODEX.md, AGENTS.md + WIP/tickets/ structure)</option>
+          </select>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted)">Repo: <strong>${safeHTML(form.name)}</strong> · Path: <code style="font-size:10px">${safeHTML(form.localPath)}</code></div>
+      ` : `
+        <div class="zaf-field"><label>Agent role</label>
+          <select id="nr-agent-role">
+            ${agentKeys.map(k => `<option value="${k}" ${k===form.agentRole?'selected':''}>${safeHTML(agents[k].roleName || k)} (${k})</option>`).join('')}
+          </select>
+        </div>
+        <div class="zaf-field"><label>Harness</label>
+          <select id="nr-agent-harness">
+            ${harnesses.map(h => `<option value="${h}" ${h===form.agentHarness?'selected':''}>${displayHarness(h)}</option>`).join('')}
+          </select>
+        </div>
+        <div class="zaf-field"><label>Scaffold instructions</label>
+          <textarea id="nr-scaffold-instructions" rows="4" placeholder="What should this repo do? The agent will receive this as its scaffolding brief.">${safeHTML(form.scaffoldInstructions)}</textarea>
+        </div>
+        <div style="font-size:11px;color:var(--text-muted)">Repo: <strong>${safeHTML(form.name)}</strong> · Path: <code style="font-size:10px">${safeHTML(form.localPath)}</code></div>
+      `}`;
+    footer.innerHTML = `
+      <button class="zaf-btn secondary" id="nr-back">← Back</button>
+      <button class="zaf-btn" id="nr-create">${form.mode === 'cli-scaffold' ? 'Create & Dispatch Agent' : 'Create Repository'}</button>`;
+
+    footer.querySelector('#nr-back').addEventListener('click', renderStep1);
+    footer.querySelector('#nr-create').addEventListener('click', async () => {
+      if (form.mode === 'manual') {
+        form.templateName = body.querySelector('#nr-template')?.value || 'zaf-standard';
+      } else {
+        form.agentRole             = body.querySelector('#nr-agent-role')?.value || agentKeys[0];
+        form.agentHarness          = body.querySelector('#nr-agent-harness')?.value || 'claude-code';
+        form.scaffoldInstructions  = body.querySelector('#nr-scaffold-instructions')?.value || '';
+      }
+
+      const btn = footer.querySelector('#nr-create');
+      btn.disabled = true;
+      btn.textContent = 'Creating…';
+
+      try {
+        const r = await fetch('/api/repo/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name:                 form.name,
+            displayName:          form.displayName || form.name,
+            localPath:            form.localPath,
+            description:          form.description,
+            remoteUrl:            form.remoteUrl,
+            mode:                 form.mode,
+            templateName:         form.templateName,
+            agentRole:            form.agentRole,
+            agentHarness:         form.agentHarness,
+            scaffoldInstructions: form.scaffoldInstructions,
+          }),
+        });
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || 'Create failed');
+        close();
+        await loadData();
+        if (data.ticketId) {
+          openConsolePanel();
+          alert(`Repository created.\nScaffold ticket: ${data.ticketId}\nAgent dispatched.`);
+        } else {
+          alert(`Repository "${form.name}" created at:\n${form.localPath}`);
+        }
+      } catch (err) {
+        alert('Create failed: ' + err.message);
+        btn.disabled = false;
+        btn.textContent = form.mode === 'cli-scaffold' ? 'Create & Dispatch Agent' : 'Create Repository';
+      }
+    });
+  }
+
+  renderStep1();
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   PHASE 5: INTERACTIVE CONTROL CENTER (TICKET & ORG BUILDER)
-   ═══════════════════════════════════════════════════════════════ */
+// =========================================================================
+// MULTI-CONSOLE TERMINAL PANEL
+// =========================================================================
 
-let activeControlTab = 'ticket';
+function initConsoleResize() {
+  const handle = document.getElementById('console-resize-handle');
+  if (!handle) return;
+
+  let dragging = false, startY = 0, startHeight = 0;
+
+  handle.addEventListener('mousedown', e => {
+    dragging = true;
+    startY = e.clientY;
+    startHeight = document.getElementById('console-panel').offsetHeight;
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const newH = Math.max(80, Math.min(window.innerHeight * 0.7, startHeight + (startY - e.clientY)));
+    document.documentElement.style.setProperty('--console-height', newH + 'px');
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    const h = document.getElementById('console-panel').offsetHeight;
+    localStorage.setItem('zaf-console-height', h);
+    localStorage.removeItem('zaf-console-collapsed');
+  });
+
+  handle.addEventListener('dblclick', () => {
+    const collapsed = localStorage.getItem('zaf-console-collapsed') === 'true';
+    if (collapsed) {
+      const saved = localStorage.getItem('zaf-console-height') || '260';
+      document.documentElement.style.setProperty('--console-height', saved + 'px');
+      localStorage.setItem('zaf-console-collapsed', 'false');
+    } else {
+      const h = document.getElementById('console-panel').offsetHeight;
+      localStorage.setItem('zaf-console-height', h);
+      document.documentElement.style.setProperty('--console-height', '0px');
+      localStorage.setItem('zaf-console-collapsed', 'true');
+    }
+  });
+}
+
+function bindConsolePanel() {
+  document.getElementById('console-panel-close')?.addEventListener('click', closeConsolePanel);
+  document.getElementById('console-clear-terminated')?.addEventListener('click', async () => {
+    await fetch('/api/process/clear');
+  });
+  document.getElementById('console-kill-active')?.addEventListener('click', async () => {
+    if (!STATE.activeProcessTab) return;
+    if (!confirm('Kill subshell ' + STATE.activeProcessTab + '?')) return;
+    await fetch('/api/process/kill?id=' + encodeURIComponent(STATE.activeProcessTab));
+  });
+
+  // ↓ Latest: switch to most recent live process + scroll terminal to bottom
+  document.getElementById('console-jump-latest')?.addEventListener('click', () => {
+    const live = Array.from(STATE.processes.values())
+      .filter(p => isLiveProcess(p.meta))
+      .sort((a, b) => (b.meta.startTime || 0) - (a.meta.startTime || 0));
+    if (live.length) {
+      STATE.activeProcessTab = live[0].meta.processId;
+      renderConsoleTabs();
+    }
+    const term = STATE.terminals.get(STATE.activeProcessTab);
+    if (term) try { term.scrollToBottom(); } catch {}
+  });
+
+  // < > tab bar scroll arrows
+  document.getElementById('console-tabs-prev')?.addEventListener('click', () => {
+    const el = document.getElementById('console-tabs');
+    if (el) el.scrollBy({ left: -160, behavior: 'smooth' });
+  });
+  document.getElementById('console-tabs-next')?.addEventListener('click', () => {
+    const el = document.getElementById('console-tabs');
+    if (el) el.scrollBy({ left: 160, behavior: 'smooth' });
+  });
+
+  // Keyboard nav: Alt+← / Alt+→ cycle; Alt+1-9 jump by index
+  document.addEventListener('keydown', (e) => {
+    if (!e.altKey) return;
+    const tabsEl = document.getElementById('console-tabs');
+    if (!tabsEl) return;
+    const tabs = Array.from(tabsEl.querySelectorAll('.console-tab[data-process-id]'));
+    if (!tabs.length) return;
+
+    const currentIdx = tabs.findIndex(t => t.dataset.processId === STATE.activeProcessTab);
+    let newIdx = -1;
+
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      newIdx = currentIdx <= 0 ? tabs.length - 1 : currentIdx - 1;
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      newIdx = currentIdx >= tabs.length - 1 ? 0 : currentIdx + 1;
+    } else if (e.key >= '1' && e.key <= '9') {
+      const idx = parseInt(e.key, 10) - 1;
+      if (idx < tabs.length) { e.preventDefault(); newIdx = idx; }
+    }
+
+    if (newIdx >= 0) {
+      STATE.activeProcessTab = tabs[newIdx].dataset.processId;
+      renderConsoleTabs();
+    }
+  });
+}
+
+function bindTopbarConsoleToggle() {
+  document.getElementById('topbar-console-toggle')?.addEventListener('click', () => {
+    STATE.consoleOpen ? closeConsolePanel() : openConsolePanel();
+  });
+}
+
+function openConsolePanel() {
+  STATE.consoleOpen = true;
+  document.getElementById('console-panel').classList.add('active');
+  document.getElementById('console-panel-dot').classList.add('active');
+  document.getElementById('console-pulse').classList.add('active');
+  const handle = document.getElementById('console-resize-handle');
+  if (handle) handle.style.display = 'block';
+  const savedHeight = localStorage.getItem('zaf-console-height');
+  const collapsed = localStorage.getItem('zaf-console-collapsed') === 'true';
+  if (savedHeight && !collapsed) {
+    document.documentElement.style.setProperty('--console-height', savedHeight + 'px');
+  }
+}
+function closeConsolePanel() {
+  STATE.consoleOpen = false;
+  document.getElementById('console-panel').classList.remove('active');
+  document.getElementById('console-panel-dot').classList.remove('active');
+  document.getElementById('console-pulse').classList.remove('active');
+  const handle = document.getElementById('console-resize-handle');
+  if (handle) handle.style.display = 'none';
+}
+
+function updateShellCounter() {
+  const total = STATE.processes.size;
+  const running = Array.from(STATE.processes.values()).filter(p => p.meta.status === 'running').length;
+  const countEl = document.getElementById('topbar-shell-count');
+  const runtimeEl = document.getElementById('runtime-active');
+  if (countEl) {
+    countEl.textContent = total + (running ? ` (${running})` : '');
+    countEl.classList.toggle('running', running > 0);
+  }
+  if (runtimeEl) runtimeEl.textContent = running;
+  const subtitle = document.getElementById('console-panel-subtitle');
+  if (subtitle) {
+    if (!total) subtitle.textContent = '— No active subshells';
+    else subtitle.textContent = `— ${running} running · ${total - running} terminated`;
+  }
+}
+
+function onProcessStart(meta) {
+  if (!STATE.processes.has(meta.processId)) {
+    STATE.processes.set(meta.processId, { meta, lines: [] });
+  } else {
+    STATE.processes.get(meta.processId).meta = meta;
+  }
+  // CLI Hub inline PTYs don't touch Multi-Console
+  if (meta.kind === 'cli-hub') return;
+  STATE.activeProcessTab = meta.processId;
+  openConsolePanel();
+  renderConsoleTabs();
+  updateShellCounter();
+}
+
+function onProcessLog(msg) {
+  const entry = STATE.processes.get(msg.processId);
+  if (!entry) return;
+  entry.lines.push({ line: msg.line, kind: msg.kind, ts: msg.ts });
+  if (entry.lines.length > 8000) entry.lines.splice(0, entry.lines.length - 8000);
+  if (STATE.activeProcessTab === msg.processId) {
+    appendActiveTabLine(msg);
+  }
+}
+
+function onProcessEnd(meta) {
+  const entry = STATE.processes.get(meta.processId);
+  if (entry) entry.meta = meta;
+  // Clear countdown if still running
+  if (STATE.prefireCountdowns.has(meta.processId)) {
+    clearInterval(STATE.prefireCountdowns.get(meta.processId));
+    STATE.prefireCountdowns.delete(meta.processId);
+  }
+  // Handle CLI Hub inline PTY endings (TKT-ZAF-0019)
+  const cliHubInfo = STATE.cliHubProcesses.get(meta.processId);
+  if (cliHubInfo) {
+    STATE.cliHubProcesses.delete(meta.processId);
+    const { harnessId, kind } = cliHubInfo;
+    if (kind === 'install') {
+      const btn = document.getElementById(`cli-install-btn-${harnessId}`);
+      if (btn) { btn.disabled = false; btn.textContent = 'Install'; }
+      if (meta.exitCode === 0) {
+        fetch(`/api/cli/status?harness=${encodeURIComponent(harnessId)}`)
+          .then(r => r.json())
+          .then(data => {
+            STATE.cliHubStatus[harnessId] = data;
+            const badge = document.getElementById(`cli-badge-install-${harnessId}`);
+            if (badge) {
+              badge.textContent = data.installed ? `✓ ${data.version || 'Installed'}` : '✗ Not installed';
+              badge.className = `cli-status-badge ${data.installed ? 'installed' : 'not-installed'}`;
+            }
+          }).catch(() => {});
+      }
+    } else if (kind === 'connect') {
+      const btn = document.getElementById(`cli-connect-btn-${harnessId}`);
+      if (btn) { btn.disabled = false; btn.textContent = 'Connect / Auth'; }
+      if (meta.exitCode === 0) {
+        const ts = new Date().toLocaleTimeString();
+        STATE.cliHubConnected[harnessId] = ts;
+        const authBadge = document.getElementById(`cli-badge-auth-${harnessId}`);
+        if (authBadge) { authBadge.textContent = `Connected ✓ ${ts}`; authBadge.className = 'cli-status-badge auth-connected'; }
+        fetch(`/api/cli/status?harness=${encodeURIComponent(harnessId)}`)
+          .then(r => r.json())
+          .then(data => {
+            STATE.cliHubStatus[harnessId] = data;
+            const badge = document.getElementById(`cli-badge-install-${harnessId}`);
+            if (badge) {
+              badge.textContent = data.installed ? `✓ ${data.version || 'Installed'}` : '✗ Not installed';
+              badge.className = `cli-status-badge ${data.installed ? 'installed' : 'not-installed'}`;
+            }
+          }).catch(() => {});
+      }
+    }
+    return; // Don't update console tabs for CLI Hub processes
+  }
+  renderConsoleTabs();
+  updateShellCounter();
+}
+
+// PTY byte chunk received — write to xterm.js terminal (with dedup by ts, TKT-ZAF-0023)
+function onProcessPty(processId, base64Data, ts) {
+  const term = STATE.terminals.get(processId);
+  if (!term) return;
+  if (ts !== undefined) {
+    const lastTs = STATE.terminalLastTs.get(processId) || 0;
+    if (ts <= lastTs) return;
+    STATE.terminalLastTs.set(processId, ts);
+  }
+  try {
+    const binary = atob(base64Data);
+    const arr = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) arr[i] = binary.charCodeAt(i);
+    term.write(arr);
+  } catch {}
+}
+
+// 10-second pre-fire countdown started
+function onProcessPrefire(processId, prefireDeadline) {
+  const deadline = new Date(prefireDeadline).getTime();
+  const badgeId = `prefire-badge-${processId}`;
+  const tick = () => {
+    const el = document.getElementById(badgeId);
+    const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    if (el) el.textContent = remaining > 0 ? `⏱ ${remaining}s pre-fire` : '⚡ Seeding…';
+    if (remaining <= 0) {
+      clearInterval(STATE.prefireCountdowns.get(processId));
+      STATE.prefireCountdowns.delete(processId);
+    }
+  };
+  const iv = setInterval(tick, 500);
+  STATE.prefireCountdowns.set(processId, iv);
+  tick();
+}
+
+// Seed was injected — update badge
+function onProcessSeeded(processId) {
+  const badge = document.getElementById(`prefire-badge-${processId}`);
+  if (badge) { badge.textContent = '✓ Seeded · running'; badge.style.color = '#10b981'; }
+  clearInterval(STATE.prefireCountdowns.get(processId));
+  STATE.prefireCountdowns.delete(processId);
+}
+
+// Operator paused pre-fire
+function onProcessPrefirePaused(processId) {
+  clearInterval(STATE.prefireCountdowns.get(processId));
+  STATE.prefireCountdowns.delete(processId);
+  const badge = document.getElementById(`prefire-badge-${processId}`);
+  if (badge) { badge.textContent = '⏸ Pre-fire paused'; badge.style.color = '#f59e0b'; }
+}
+
+
+function isLiveProcess(meta) {
+  return meta.status === 'running' || meta.status === 'pre-fire' || meta.status === 'pre-fire-paused';
+}
+function isCompletedProcess(meta) {
+  return meta.status === 'completed';
+}
+function isFailedProcess(meta) {
+  return !isLiveProcess(meta) && !isCompletedProcess(meta);
+}
+
+function renderConsoleTabs() {
+  const tabsEl = document.getElementById('console-tabs');
+  const bodiesEl = document.getElementById('console-bodies');
+  const emptyEl = document.getElementById('console-empty');
+  if (!tabsEl) return;
+
+  const allProcs = Array.from(STATE.processes.values()).filter(p => p.meta.kind !== 'cli-hub');
+  if (!allProcs.length) {
+    tabsEl.innerHTML = '';
+    bodiesEl.querySelectorAll('.console-body').forEach(b => b.remove());
+    if (emptyEl) emptyEl.style.display = 'flex';
+    STATE.activeProcessTab = null;
+    return;
+  }
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  // Group by Live / Completed / Failed — newest first within each group
+  const byTime = (a, b) => (b.meta.startTime || 0) - (a.meta.startTime || 0);
+  const live      = allProcs.filter(p => isLiveProcess(p.meta)).sort(byTime);
+  const completed = allProcs.filter(p => isCompletedProcess(p.meta)).sort(byTime);
+  const failed    = allProcs.filter(p => isFailedProcess(p.meta)).sort(byTime);
+  const procs = [...live, ...completed, ...failed];
+
+  if (!procs.find(p => p.meta.processId === STATE.activeProcessTab)) {
+    STATE.activeProcessTab = (live[0] || procs[0]).meta.processId;
+  }
+
+  function makeTabHtml({ meta }) {
+    const statusClass = isLiveProcess(meta) ? 'running' :
+                       meta.status === 'completed' ? 'completed' :
+                       meta.status === 'killed' ? 'killed' :
+                       meta.status === 'external' ? 'external' : 'failed';
+    const dur = meta.durationSec != null ? `${meta.durationSec.toFixed(1)}s`
+              : `${((Date.now() - meta.startTime)/1000).toFixed(0)}s+`;
+    const isActive = STATE.activeProcessTab === meta.processId;
+    const prefireId = `prefire-badge-${meta.processId}`;
+    return `
+      <div class="console-tab ${isActive?'active':''}" data-process-id="${meta.processId}">
+        <span class="tab-status-dot ${statusClass}"></span>
+        <span class="tab-id">${meta.processId}</span>
+        <span class="tab-meta">${meta.role} · ${meta.ticketId}</span>
+        <span class="tab-meta">${dur}</span>
+        ${meta.status === 'pre-fire' || meta.status === 'pre-fire-paused' ? `<span id="${prefireId}" class="tab-meta" style="color:#f59e0b">⏱ pre-fire</span>` : ''}
+        <span class="tab-close" data-close="${meta.processId}" title="Remove from tabs">✕</span>
+      </div>`;
+  }
+
+  const parts = [];
+  if (live.length)      parts.push(...live.map(makeTabHtml));
+  if (live.length && (completed.length || failed.length)) parts.push('<div class="console-tab-divider"></div>');
+  if (completed.length) parts.push(...completed.map(makeTabHtml));
+  if (completed.length && failed.length) parts.push('<div class="console-tab-divider"></div>');
+  if (failed.length)    parts.push(...failed.map(makeTabHtml));
+  tabsEl.innerHTML = parts.join('');
+
+  // Body containers — xterm.js based (TKT-ZAF-0013)
+  const existingBodies = new Set(Array.from(bodiesEl.querySelectorAll('.console-body')).map(b => b.dataset.processId));
+  for (const { meta } of procs) {
+    let body = bodiesEl.querySelector(`.console-body[data-process-id="${meta.processId}"]`);
+    const isRunning = meta.status === 'running' || meta.status === 'pre-fire' || meta.status === 'pre-fire-paused';
+    if (!body) {
+      body = document.createElement('div');
+      body.className = 'console-body';
+      body.dataset.processId = meta.processId;
+      body.innerHTML = `
+        <div class="console-body-meta">
+          <span>Process<strong> ${meta.processId}</strong></span>
+          <span>PID<strong> ${meta.pid || '—'}</strong></span>
+          <span>Ticket<strong> ${meta.ticketId}</strong></span>
+          <span>Role<strong> ${meta.role}</strong></span>
+          <span>Harness<strong title="${meta.harness === 'mock' ? 'Test-only harness. Produces synthetic agent output to validate the ZAF pipeline without consuming AI credits. Not a real AI.' : ''}"> ${displayHarness(meta.harness)}</strong></span>
+          <span>Model<strong> ${meta.model || 'default'}</strong></span>
+          <span>Heartbeat<strong> ${meta.heartbeat || '—'}s</strong></span>
+          <span class="console-body-status">Status<strong> ${meta.status}</strong></span>
+        </div>
+        <div class="xterm-host" id="xterm-host-${meta.processId}" style="height:340px;background:#0a0a0f;"></div>
+        <div class="steer-row" data-steer-for="${meta.processId}" style="display:flex;gap:6px;padding:6px;border-top:1px solid #1a1a20;align-items:center;">
+          <input type="text" class="steer-input" placeholder="Send input to agent…" style="flex:1;background:#111118;color:#e0e0e8;border:1px solid #2a2a35;border-radius:4px;padding:5px 8px;font-family:monospace;font-size:12px;" />
+          <button class="steer-send zaf-btn secondary" style="padding:5px 10px;font-size:11px;" data-steer-pid="${meta.processId}">Send</button>
+          <button class="steer-ctrlc zaf-btn" style="padding:5px 8px;font-size:11px;background:#7c3aed;" title="Send Ctrl+C" data-int-pid="${meta.processId}">⌃C</button>
+          <button class="steer-terminate zaf-btn" style="padding:5px 8px;font-size:11px;background:#dc2626;" title="Terminate + log" data-term-pid="${meta.processId}">Terminate</button>
+          <label style="font-size:11px;color:#666;display:flex;align-items:center;gap:4px;cursor:pointer;">
+            <input type="checkbox" class="pause-prefire-chk" data-pause-pid="${meta.processId}" ${meta.status==='pre-fire-paused'?'checked':''} />Pause pre-fire
+          </label>
+        </div>`;
+      bodiesEl.appendChild(body);
+      // Initialize xterm.js terminal
+      initXterm(meta.processId, body);
+    } else {
+      body.querySelector('.console-body-status')?.replaceChildren(...statusFragment(meta));
+    }
+    existingBodies.delete(meta.processId);
+    body.classList.toggle('active', STATE.activeProcessTab === meta.processId);
+    // Show/hide steer row based on status
+    const steerRow = body.querySelector('.steer-row');
+    if (steerRow) steerRow.style.display = isRunning ? 'flex' : 'none';
+  }
+  for (const stale of existingBodies) {
+    bodiesEl.querySelector(`.console-body[data-process-id="${stale}"]`)?.remove();
+  }
+
+  // Auto-scroll active tab into view
+  const activeTabEl = tabsEl.querySelector('.console-tab.active');
+  if (activeTabEl) activeTabEl.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+
+  tabsEl.querySelectorAll('.console-tab').forEach(tab => {
+    tab.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tab-close')) return;
+      STATE.activeProcessTab = tab.dataset.processId;
+      renderConsoleTabs();
+    });
+  });
+  tabsEl.querySelectorAll('.tab-close').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = btn.dataset.close;
+      const entry = STATE.processes.get(id);
+      if (entry && entry.meta.status === 'running') {
+        if (!confirm('This shell is still running. Kill and remove?')) return;
+        fetch('/api/process/kill?id=' + encodeURIComponent(id));
+      }
+      STATE.processes.delete(id);
+      if (STATE.activeProcessTab === id) STATE.activeProcessTab = null;
+      renderConsoleTabs();
+      updateShellCounter();
+    });
+  });
+
+  // Steering buttons (TKT-ZAF-0014)
+  bodiesEl.querySelectorAll('.steer-send').forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.steerPid;
+      const input = bodiesEl.querySelector(`.steer-row[data-steer-for="${pid}"] .steer-input`);
+      if (!input || !input.value.trim()) return;
+      const text = input.value + '\r\n';
+      fetch(`/api/process/${encodeURIComponent(pid)}/steer`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      input.value = '';
+    };
+  });
+  bodiesEl.querySelectorAll('.steer-input').forEach(inp => {
+    inp.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); inp.nextElementSibling && inp.nextElementSibling.click(); } };
+  });
+  bodiesEl.querySelectorAll('.steer-ctrlc').forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.intPid;
+      fetch(`/api/process/${encodeURIComponent(pid)}/interrupt`, { method: 'POST' });
+    };
+  });
+  bodiesEl.querySelectorAll('.steer-terminate').forEach(btn => {
+    btn.onclick = () => {
+      const pid = btn.dataset.termPid;
+      if (!confirm('Terminate this agent and write TERMINATED to its Handoff Log?')) return;
+      fetch(`/api/process/${encodeURIComponent(pid)}/terminate`, { method: 'POST' });
+    };
+  });
+  bodiesEl.querySelectorAll('.pause-prefire-chk').forEach(chk => {
+    chk.onchange = () => {
+      const pid = chk.dataset.pausePid;
+      if (chk.checked) {
+        fetch(`/api/process/${encodeURIComponent(pid)}/pause-prefire`, { method: 'POST' });
+      }
+    };
+  });
+}
+
+// Initialize xterm.js terminal for a process (TKT-ZAF-0013)
+function initXterm(processId, bodyEl) {
+  if (!window.Terminal || STATE.terminals.has(processId)) return;
+  const hostEl = bodyEl.querySelector(`#xterm-host-${processId}`);
+  if (!hostEl) return;
+
+  const sidecarUrl = window._zafSidecarUrl || 'http://localhost:4242';
+
+  const term = new Terminal({
+    convertEol: true,
+    fontSize: 12,
+    fontFamily: 'monospace',
+    theme: {
+      background: '#0a0a0f',
+      foreground: '#c8c8d4',
+      cursor: '#10b981',
+      selectionBackground: '#2d3748',
+    },
+    cursorBlink: true,
+    scrollback: 5000,
+    cols: 180,
+    rows: 24,
+  });
+
+  const fitAddon = window.FitAddon ? new FitAddon.FitAddon() : null;
+  if (fitAddon) term.loadAddon(fitAddon);
+
+  term.open(hostEl);
+  if (fitAddon) { try { fitAddon.fit(); } catch {} }
+  STATE.terminals.set(processId, term);
+
+  // Keystrokes in terminal → POST to /api/process/<id>/steer (bidirectional TKT-ZAF-0014)
+  term.onData((data) => {
+    const base64 = btoa(unescape(encodeURIComponent(data)));
+    fetch(`${sidecarUrl}/api/process/${encodeURIComponent(processId)}/steer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: base64 }),
+    }).catch(() => {});
+  });
+
+  // Load PTY buffer (replay missed chunks, skip already-rendered by ts, TKT-ZAF-0023)
+  fetch(`${sidecarUrl}/api/process/buffer?id=${encodeURIComponent(processId)}`)
+    .then(r => r.json())
+    .then(({ buffer }) => {
+      if (Array.isArray(buffer)) {
+        let highestTs = STATE.terminalLastTs.get(processId) || 0;
+        for (const chunk of buffer) {
+          if (chunk.ts !== undefined && chunk.ts <= highestTs) continue;
+          if (chunk.data) {
+            try {
+              const bin = atob(chunk.data);
+              const arr = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+              term.write(arr);
+            } catch {}
+          }
+          if (chunk.ts !== undefined && chunk.ts > highestTs) highestTs = chunk.ts;
+        }
+        STATE.terminalLastTs.set(processId, highestTs);
+      }
+    })
+    .catch(() => {});
+}
+
+function statusFragment(meta) {
+  const span = document.createElement('span');
+  span.textContent = 'Status';
+  const strong = document.createElement('strong');
+  strong.textContent = ' ' + meta.status;
+  return [span, strong];
+}
+
+// Initialize xterm.js terminal in an arbitrary host element (CLI Hub inline PTY — TKT-ZAF-0019)
+function initXtermInElement(processId, hostEl) {
+  if (!window.Terminal || STATE.terminals.has(processId)) return;
+  const sidecarUrl = window._zafSidecarUrl || 'http://localhost:4242';
+  const term = new Terminal({
+    convertEol: true, fontSize: 12, fontFamily: 'monospace',
+    theme: { background: '#0a0a0f', foreground: '#c8c8d4', cursor: '#10b981', selectionBackground: '#2d3748' },
+    cursorBlink: true, scrollback: 2000, cols: 120, rows: 14,
+  });
+  const fitAddon = window.FitAddon ? new FitAddon.FitAddon() : null;
+  if (fitAddon) term.loadAddon(fitAddon);
+  term.open(hostEl);
+  if (fitAddon) { try { fitAddon.fit(); } catch {} }
+  STATE.terminals.set(processId, term);
+  term.onData((data) => {
+    const base64 = btoa(unescape(encodeURIComponent(data)));
+    fetch(`${sidecarUrl}/api/process/${encodeURIComponent(processId)}/steer`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ data: base64 }),
+    }).catch(() => {});
+  });
+  fetch(`${sidecarUrl}/api/process/buffer?id=${encodeURIComponent(processId)}`)
+    .then(r => r.json())
+    .then(({ buffer }) => {
+      if (!Array.isArray(buffer)) return;
+      let highestTs = STATE.terminalLastTs.get(processId) || 0;
+      for (const chunk of buffer) {
+        if (chunk.ts !== undefined && chunk.ts <= highestTs) continue;
+        if (chunk.data) {
+          try {
+            const bin = atob(chunk.data);
+            const arr = new Uint8Array(bin.length);
+            for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+            term.write(arr);
+          } catch {}
+        }
+        if (chunk.ts !== undefined && chunk.ts > highestTs) highestTs = chunk.ts;
+      }
+      STATE.terminalLastTs.set(processId, highestTs);
+    }).catch(() => {});
+}
+
+function appendLineToLogs(logsEl, entry) {
+  const line = document.createElement('div');
+  line.className = 'console-line ' + (entry.kind || 'stdout');
+  const ts = new Date(entry.ts).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  line.innerHTML = `<span class="ts">${ts}</span>${safeHTML(entry.line)}`;
+  logsEl.appendChild(line);
+  logsEl.scrollTop = logsEl.scrollHeight;
+}
+
+function appendActiveTabLine(msg) {
+  const logsEl = document.querySelector(`.console-body-logs[data-logs-for="${msg.processId}"]`);
+  if (!logsEl) return;
+  appendLineToLogs(logsEl, msg);
+}
+
+// =========================================================================
+// VIEW: AUDIT LOG
+// =========================================================================
+
+function renderAudit(container) {
+  loadAudit();
+  let kindFilter = STATE._auditFilter || '';
+  const entries = STATE.audit.slice().reverse();
+  const filtered = kindFilter ? entries.filter(e => (e.kind||'').startsWith(kindFilter)) : entries;
+
+  const kindTag = (kind) => {
+    const root = (kind||'').split('.')[0];
+    return `<span class="zaf-audit-tag ${root}">${kind}</span>`;
+  };
+
+  const summary = (e) => {
+    if (e.kind === 'process.spawn')        return `spawn <code>${e.processId}</code> ${e.role} via ${e.harness} → ${e.ticketId}`;
+    if (e.kind === 'process.end')          return `end <code>${e.processId}</code> exit ${e.exitCode} (${e.durationSec?.toFixed?.(1)}s)`;
+    if (e.kind === 'process.kill')         return `killed <code>${e.processId}</code> ${e.ticketId}`;
+    if (e.kind === 'process.seeded')       return `seed injected → <code>${e.processId}</code> (${e.seedLength}b)`;
+    if (e.kind === 'process.limit_hit')    return `rate-limit hit <code>${e.processId}</code> ${e.harness}: ${safeHTML((e.line||'').slice(0,60))}`;
+    if (e.kind === 'process.retry')        return `retry #${e.retryCount} <code>${e.processId}</code> ${e.ticketId}`;
+    if (e.kind === 'process.blocked_budget') return `rate-limit blocked <code>${e.processId}</code> ${e.ticketId}`;
+    if (e.kind === 'operator.steer')       return `steer → <code>${e.processId}</code>: ${safeHTML((e.summary||'').slice(0,80))}`;
+    if (e.kind === 'operator.interrupt')   return `Ctrl+C → <code>${e.processId}</code>`;
+    if (e.kind === 'operator.terminate')   return `TERMINATED → <code>${e.processId}</code> ${e.ticketId}`;
+    if (e.kind === 'operator.pause_prefire') return `pre-fire paused <code>${e.processId}</code>`;
+    if (e.kind === 'agent.tool_call')      return `tool call <code>${e.line?.slice(0, 80)}</code>`;
+    if (e.kind === 'agent.api_request')    return `api call <code>${e.line?.slice(0, 80)}</code>`;
+    if (e.kind === 'agent.decision')       return `decision <code>${e.line?.slice(0, 80)}</code>`;
+    if (e.kind === 'ticket.create')        return `ticket <code>${e.ticketId}</code> "${safeHTML(e.title)}"`;
+    if (e.kind === 'config.save')          return `config saved`;
+    if (e.kind === 'server.boot')          return `server boot on :${e.port}`;
+    return JSON.stringify(e).slice(0, 160);
+  };
+
+  const rows = filtered.slice(0, 500).map(e => `
+    <div class="zaf-audit-row">
+      <div class="audit-ts">${new Date(e.ts).toLocaleString()}</div>
+      <div class="audit-kind">${kindTag(e.kind)}</div>
+      <div class="audit-body">${summary(e)}</div>
+    </div>`).join('');
+
+  const kinds = ['', 'process', 'agent', 'operator', 'config', 'ticket', 'server'];
+  const filterButtons = kinds.map(k => `<button class="zaf-btn secondary ${kindFilter===k?'active':''}" data-filter="${k}" style="padding:5px 10px;font-size:10px;text-transform:uppercase;">${k || 'All'}</button>`).join('');
+
+  container.innerHTML = `
+    <div class="zaf-audit fade-in">
+      <div class="zaf-overview-header" style="padding-bottom:14px">
+        <div>
+          <div class="zaf-overview-title"><div class="accent-bar"></div>Immutable Audit Log</div>
+          <div class="zaf-overview-sub">Append-only ledger of every tool call, API request, planner decision, and lifecycle event across all subshells. Cannot be edited or deleted from the UI.</div>
+        </div>
+        <div class="zaf-audit-immutable-note">Append-only — ${STATE.audit.length} entries</div>
+      </div>
+      <div class="zaf-audit-toolbar">
+        ${filterButtons}
+        <button class="zaf-btn secondary" id="audit-refresh">Refresh</button>
+      </div>
+      <div>${rows || '<div style="color:var(--text-muted);padding:20px;text-align:center">No audit entries yet.</div>'}</div>
+    </div>`;
+
+  container.querySelectorAll('button[data-filter]').forEach(b => b.addEventListener('click', () => {
+    STATE._auditFilter = b.dataset.filter;
+    renderAudit(container);
+  }));
+  container.querySelector('#audit-refresh')?.addEventListener('click', async () => { await loadAudit(); renderAudit(container); });
+}
+
+// =========================================================================
+// VIEW: CONTROL CENTER (Ticket Builder + Agent Editor + Usage)
+// =========================================================================
 
 function renderControl(container) {
   if (!STATE.config) {
-    container.innerHTML = `
-      <div style="padding: 40px; text-align: center; color: var(--text-secondary)">
-        <div class="spinner" style="margin: 0 auto 16px"></div>
-        <div>Loading ZAF configurations...</div>
-      </div>`;
-    fetch('/api/config')
-      .then(res => res.json())
-      .then(conf => {
-        STATE.config = conf;
-        renderControl(container);
-      })
-      .catch(err => {
-        container.innerHTML = `<div style="padding:40px;color:#ef4444">Failed to load ZAF configurations: ${err.message}</div>`;
-      });
+    container.innerHTML = `<div style="padding:40px;text-align:center;color:var(--text-secondary)"><div class="spinner" style="margin:0 auto 16px"></div>Loading ZAF configurations…</div>`;
+    fetch('/api/config').then(r => r.json()).then(c => { STATE.config = c; renderControl(container); }).catch(() => {});
     return;
   }
 
+  const tab = STATE.controlTab || 'ticket';
   const tabs = [
-    { id: 'ticket', label: 'Ticket Builder', icon: '🎫' },
-    { id: 'agents', label: 'Agent & Org Builder', icon: '👥' },
-    { id: 'usage', label: 'Subscription & Usage', icon: '📊' }
+    { id:'ticket',  label:'Ticket Builder',    icon:'TKT' },
+    { id:'agents',  label:'Agent Editor',      icon:'AGT' },
+    { id:'usage',   label:'Telemetry & Usage', icon:'USE' },
+    { id:'cli-hub', label:'CLI Hub',           icon:'CLI' },
   ];
+  const tabsHtml = tabs.map(t => `<button class="zaf-control-tab ${tab===t.id?'active':''}" data-tab="${t.id}"><span>${t.icon}</span> ${t.label}</button>`).join('');
 
-  const tabsHtml = tabs.map(t => `
-    <button class="console-btn control-tab-btn ${activeControlTab === t.id ? 'active' : ''}" data-tab="${t.id}" style="padding: 6px 16px; font-size: 12px; font-weight: 600; display:flex; align-items:center; gap:6px;">
-      <span>${t.icon}</span> ${t.label}
-    </button>
-  `).join('');
+  let body = '';
+  if (tab === 'ticket')      body = renderControlTicketBuilder();
+  else if (tab === 'agents') body = renderControlAgentEditor();
+  else if (tab === 'usage')  body = renderControlUsage();
+  else if (tab === 'cli-hub') body = renderControlCliHub();
 
-  let panelHtml = '';
+  container.innerHTML = `
+    <div class="zaf-control-wrap fade-in">
+      <div class="zaf-overview-header" style="padding-bottom:14px;margin-bottom:16px">
+        <div>
+          <div class="zaf-overview-title"><div class="accent-bar"></div>ZAF Sovereign Control Center</div>
+          <div class="zaf-overview-sub">Construct tickets, calibrate agent personas, monitor subscription telemetry.</div>
+        </div>
+      </div>
+      <div class="zaf-control-tabs">${tabsHtml}</div>
+      ${body}
+    </div>`;
+  container.querySelectorAll('.zaf-control-tab').forEach(b => b.addEventListener('click', () => { STATE.controlTab = b.dataset.tab; renderControl(container); }));
 
-  if (activeControlTab === 'ticket') {
-    panelHtml = `
-      <div class="fade-in" style="max-width: 650px; background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; box-shadow: var(--shadow-card);">
-        <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; align-items:center; gap:8px;">
-          <span>🎫</span> Construct New Ticket Context
-        </h2>
-        <form id="zaf-ticket-form" style="display:flex; flex-direction:column; gap:16px;">
-          <div class="meta-field">
-            <label class="meta-label">Target Repo Context</label>
-            <select id="tkt-repo" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-              <option value="zo-agentic-framework" selected>zo-agentic-framework</option>
-              <option value="zo">zo</option>
+  if (tab === 'ticket')  wireTicketBuilder(container);
+  if (tab === 'agents')  wireAgentEditor(container);
+  if (tab === 'cli-hub') wireCliHub(container);
+}
+
+// ---- Ticket builder ----
+function renderControlTicketBuilder() {
+  return `
+    <div class="zaf-control-card" style="max-width:780px">
+      <h2>Construct New Ticket Context</h2>
+      <form id="zaf-ticket-form" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
+        <div class="zaf-field" style="grid-column:1/3"><label>Target Repo</label>
+          <select id="tkt-repo">
+            ${(STATE.data?.repos||[]).map(r => `<option value="${r.id}" ${r.id==='zo-agentic-framework'?'selected':''}>${r.id}</option>`).join('')}
+          </select>
+        </div>
+        <div class="zaf-field" style="grid-column:1/3"><label>Title</label>
+          <input id="tkt-title" required placeholder="e.g. Wire OAuth callback validation" />
+        </div>
+        <div class="zaf-field"><label>Phase Gate</label><select id="tkt-phase"></select></div>
+        <div class="zaf-field"><label>Workstream</label><select id="tkt-workstream"></select></div>
+        <div class="zaf-field"><label>Priority</label>
+          <select id="tkt-priority">
+            <option value="P0">P0 — Critical</option>
+            <option value="P1">P1 — High</option>
+            <option value="P2" selected>P2 — Normal</option>
+            <option value="P3">P3 — Low</option>
+          </select>
+        </div>
+        <div class="zaf-field"><label>Assigned Agent Role</label>
+          <select id="tkt-role">${Object.keys(STATE.config.agents).map(k => `<option value="${k}">${STATE.config.agents[k].roleName} (${k})</option>`).join('')}</select>
+        </div>
+        <div class="zaf-field" style="grid-column:1/3"><label>Task Context & Description</label>
+          <textarea id="tkt-description" rows="6" required placeholder="Describe the goal, background context, and acceptance criteria…"></textarea>
+        </div>
+        <div style="grid-column:1/3"><button type="submit" class="zaf-btn">Create Ticket & Auto-Index</button></div>
+      </form>
+    </div>`;
+}
+
+function wireTicketBuilder(container) {
+  const tktRepo = container.querySelector('#tkt-repo');
+  if (!tktRepo) return;
+  const updateSelectors = () => {
+    const repo = tktRepo.value;
+    const phaseSel = container.querySelector('#tkt-phase');
+    const wsSel = container.querySelector('#tkt-workstream');
+    if (repo === 'zo') {
+      phaseSel.innerHTML = `
+        <option value="P0">Phase 0 — Baseline</option><option value="P1" selected>Phase 1 — Design Lock</option>
+        <option value="P2">Phase 2 — Shell V1</option><option value="P3">Phase 3 — Services</option>
+        <option value="P4">Phase 4 — Dual-Import</option><option value="P5">Phase 5 — Attio Cutover</option>
+        <option value="P6">Phase 6 — Intelligence</option>`;
+      wsSel.innerHTML = `<option value="WS-UX" selected>WS-UX</option><option value="WS-SHELL">WS-SHELL</option>
+        <option value="WS-DATA">WS-DATA</option><option value="WS-SERVICES">WS-SERVICES</option>
+        <option value="WS-CRM">WS-CRM</option><option value="WS-INTELLIGENCE">WS-INTELLIGENCE</option>
+        <option value="WS-ASSISTANT">WS-ASSISTANT</option><option value="WS-REPOS">WS-REPOS</option>`;
+    } else {
+      phaseSel.innerHTML = `<option value="P1">Phase 1 — Multi-Repo</option><option value="P2">Phase 2 — Docs</option>
+        <option value="P3">Phase 3 — CLI</option><option value="P4" selected>Phase 4 — Control</option>
+        <option value="P5">Phase 5 — Paperclip Parity</option>`;
+      wsSel.innerHTML = `<option value="WS-CLI">WS-CLI</option><option value="WS-DASHBOARD">WS-DASHBOARD</option>
+        <option value="WS-UX" selected>WS-UX</option><option value="WS-DOCS">WS-DOCS</option><option value="none">none</option>`;
+    }
+  };
+  tktRepo.addEventListener('change', updateSelectors);
+  updateSelectors();
+
+  container.querySelector('#zaf-ticket-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const payload = {
+      title:       container.querySelector('#tkt-title').value,
+      description: container.querySelector('#tkt-description').value,
+      phase:       container.querySelector('#tkt-phase').value,
+      workstream:  container.querySelector('#tkt-workstream').value,
+      priority:    container.querySelector('#tkt-priority').value,
+      role:        container.querySelector('#tkt-role').value,
+      repo:        container.querySelector('#tkt-repo').value,
+    };
+    try {
+      const r = await fetch('/api/ticket/create', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      alert('Created ' + data.ticketId);
+      await loadData();
+      navigateTo('board');
+    } catch (err) {
+      alert('Create failed: ' + err.message);
+    }
+  });
+}
+
+// ---- Agent editor ---- (TKT-ZAF-0029: personality-first, real model IDs, advanced section)
+function renderControlAgentEditor() {
+  const agents = STATE.config.agents;
+  const keys = Object.keys(agents);
+  const key = STATE.selectedAgentKey || keys[0];
+  const a = agents[key] || { roleName:'', modelId:'claude-sonnet-4-6', personality:'', reasoning:'medium', heartbeat:40, harness:'mock', structuralRole:'worker', manager:null, tools:[] };
+  const tools = STATE.config.toolsRegistry || [];
+
+  const opt = (val, sel, label) => `<option value="${val}" ${sel===val?'selected':''}>${label}</option>`;
+
+  // Model dropdown options per harness
+  const harness = a.harness || 'mock';
+  const modelOptions = HARNESS_MODEL_IDS[harness]
+    ? HARNESS_MODEL_IDS[harness].map(m => opt(m.id, a.modelId || '', `${m.id} — ${m.label}`)).join('')
+    : `<option value="" disabled>N/A</option>`;
+  const modelDisabled = !HARNESS_MODEL_IDS[harness] ? 'disabled title="Model selection N/A for this harness"' : '';
+
+  // Reasoning note
+  let reasoningNote = '';
+  if (harness === 'claude-code' || harness === 'claude') {
+    reasoningNote = 'Injected via /thinking budget command at T+2s before seed (high=10000, medium=3000, low=0).';
+  } else if (harness === 'codex') {
+    reasoningNote = 'Codex does not support configurable reasoning level — dropdown has no effect.';
+  }
+
+  // Recommended badge
+  const rec = ROLE_RECOMMENDATIONS[a.structuralRole];
+  const recBadgeHtml = rec ? `<span class="rec-badge" title="Recommended for ${a.structuralRole}">${rec.label}</span>
+    <button type="button" class="use-recommended-btn" id="use-recommended-btn">Use recommended</button>` : '';
+
+  return `
+    <div class="zaf-control-grid">
+      <div class="zaf-control-card">
+        <h2>Agent Builder</h2>
+        <div class="zaf-field"><label>Select Agent Profile</label>
+          <select id="agent-selector">${keys.map(k => `<option value="${k}" ${k===key?'selected':''}>${agents[k].roleName} (${k})</option>`).join('')}</select>
+        </div>
+        <form id="zaf-agent-form" style="display:flex;flex-direction:column;gap:12px;">
+          <div class="zaf-field"><label>Role Name</label><input id="agent-name" value="${safeHTML(a.roleName)}" /></div>
+
+          <div class="zaf-field">
+            <label>Personality &amp; Scope</label>
+            <textarea id="agent-personality" rows="6" style="resize:vertical" placeholder="Describe who this agent is, how they approach problems, and what their operational boundaries are. This text is injected directly into every seed prompt.">${safeHTML(a.personality || '')}</textarea>
+          </div>
+
+          <div class="zaf-field"><label>Default Harness</label>
+            <select id="agent-harness">
+              ${getAllHarnessOptions().map(h => opt(h.id, harness, h.label)).join('')}
             </select>
           </div>
 
-          <div class="meta-field">
-            <label class="meta-label">Ticket Title</label>
-            <input type="text" id="tkt-title" required placeholder="e.g. Implement security headers" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; transition: border var(--t-fast); width:100%;" />
-          </div>
-          
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-            <div class="meta-field">
-              <label class="meta-label">Phase Gate</label>
-              <select id="tkt-phase" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                <!-- Dynamically populated -->
-              </select>
-            </div>
-            
-            <div class="meta-field">
-              <label class="meta-label">Workstream</label>
-              <select id="tkt-workstream" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                <!-- Dynamically populated -->
-              </select>
+          <div class="zaf-field">
+            <label>Model ${recBadgeHtml}</label>
+            <div class="model-row">
+              <select id="agent-modelid" ${modelDisabled} style="flex:1">${modelOptions}</select>
             </div>
           </div>
 
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-            <div class="meta-field">
-              <label class="meta-label">Priority</label>
-              <select id="tkt-priority" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                <option value="P0">P0 — CRITICAL Block</option>
-                <option value="P1">P1 — High Priority</option>
-                <option value="P2" selected>P2 — Normal</option>
-                <option value="P3">P3 — Low</option>
-              </select>
-            </div>
-            
-            <div class="meta-field">
-              <label class="meta-label">Assigned Agent Tier</label>
-              <select id="tkt-role" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                ${Object.keys(STATE.config.agents).map(k => `
-                  <option value="${k}">${STATE.config.agents[k].roleName} (${k})</option>
-                `).join('')}
-              </select>
-            </div>
+          <div class="zaf-field"><label>Reasoning Level</label>
+            <select id="agent-reasoning">
+              ${['high','medium','low'].map(r => opt(r, a.reasoning || 'medium', r)).join('')}
+            </select>
+            ${reasoningNote ? `<div class="reasoning-note">${reasoningNote}</div>` : ''}
           </div>
 
-          <div class="meta-field">
-            <label class="meta-label">Task Context & Description</label>
-            <textarea id="tkt-description" rows="5" required placeholder="Describe the goal, background context, and requirements for the agent harness to execute..." style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; resize: vertical; transition: border var(--t-fast); width:100%;"></textarea>
+          <div class="zaf-field"><label>Structural Role (alters generated persona & bounds)</label>
+            <select id="agent-struct-role">
+              ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="zaf-persona-preview" id="persona-preview"></div>
+
+          <div class="zaf-field"><label>Supervisor (N+1)</label>
+            <select id="agent-manager">
+              <option value="">None (reports to operator)</option>
+              ${keys.filter(k => k !== key).map(k => `<option value="${k}" ${(a.manager||'')===k?'selected':''}>${agents[k].roleName} (${k})</option>`).join('')}
+            </select>
           </div>
 
-          <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
-            <span>📁</span> Create Ticket & Auto-Index
-          </button>
+          <details class="agent-advanced-section">
+            <summary>Advanced</summary>
+            <div class="agent-advanced-inner">
+              <div class="zaf-field"><label><span>Heartbeat Interval</span><span class="zaf-heartbeat-val" id="heartbeat-val">${a.heartbeat || 40} seconds</span></label>
+                <div class="zaf-heartbeat-row"><input type="range" id="agent-heartbeat" min="5" max="300" step="5" value="${a.heartbeat || 40}" /></div>
+                <div class="zaf-heartbeat-hint">Internal plumbing — how often the subshell emits a heartbeat tick.</div>
+              </div>
+
+              <div class="zaf-field"><label>Authorized CLIs</label>
+                <div id="agent-harness-multi" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg-input);border:1px solid var(--border-medium);padding:10px 12px;border-radius:var(--radius-sm);">
+                  ${getAllHarnessOptions().map(h => {
+                    const isActive = (Array.isArray(a.harnesses) && a.harnesses.length)
+                      ? a.harnesses.includes(h.id)
+                      : (a.harness === h.id);
+                    return `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
+                      <input type="checkbox" class="agent-harness-cb" value="${h.id}" ${isActive?'checked':''} style="accent-color:var(--indigo-400);" />
+                      <span>${h.label}</span>
+                    </label>`;
+                  }).join('')}
+                </div>
+              </div>
+
+              <div class="zaf-field"><label>Authorized Tools</label>
+                <div style="display:flex;flex-direction:column;gap:6px;background:var(--bg-input);border:1px solid var(--border-medium);padding:12px 14px;border-radius:var(--radius-sm);">
+                  ${tools.map(t => `
+                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+                      <input type="checkbox" class="agent-tool-cb" value="${t.id}" ${(a.tools||[]).includes(t.id)?'checked':''} style="accent-color:var(--indigo-400);margin-top:2px;" />
+                      <div><strong style="color:var(--text-primary);">${t.name}</strong>
+                      <div style="font-size:10px;color:var(--text-muted);">${safeHTML(t.description)}</div></div>
+                    </label>`).join('') || '<span style="color:var(--text-muted);font-size:11px">No tools registered yet.</span>'}
+                </div>
+              </div>
+
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                <button type="button" class="zaf-btn secondary" id="cli-probe-btn">⚙ Probe capabilities</button>
+                <span id="cli-probe-status" style="font-size:11px;color:var(--text-muted)"></span>
+              </div>
+              <div class="zaf-discovery-result" id="cli-probe-result" style="display:none"></div>
+            </div>
+          </details>
+
+          <button type="submit" class="zaf-btn">Save Agent</button>
         </form>
-      </div>`;
-  } else if (activeControlTab === 'agents') {
-    const agentKeys = Object.keys(STATE.config.agents);
-    const selectedAgentKey = STATE.selectedAgentKey || agentKeys[0];
-    const agent = STATE.config.agents[selectedAgentKey] || {
-      roleName: 'New Agent Profile', model: 'frontier', customModel: '', reasoning: 'high', heartbeat: 40, harness: 'claude-code', structuralRole: 'worker', manager: null, tools: []
-    };
-
-    const agentOptions = agentKeys.map(k => `
-      <option value="${k}" ${selectedAgentKey === k ? 'selected' : ''}>${STATE.config.agents[k].roleName} (${k})</option>
-    `).join('');
-
-    const modelOptions = [
-      { id: 'frontier', label: 'Frontier Preset (Claude 3.7 Sonnet / GPT-4.5)' },
-      { id: 'normal', label: 'Normal Preset (Claude 3.5 Haiku / GPT-4o-mini)' },
-      { id: 'reasoning', label: 'Reasoning Preset (DeepSeek R1 / o3-mini)' },
-      { id: 'custom', label: 'Custom Model Target (Specify string below)' }
-    ].map(m => `
-      <option value="${m.id}" ${agent.model === m.id ? 'selected' : ''}>${m.label}</option>
-    `).join('');
-
-    const reasoningLevels = ['high', 'medium', 'low', 'unavailable'].map(l => `
-      <option value="${l}" ${agent.reasoning === l ? 'selected' : ''}>${l.toUpperCase()}</option>
-    `).join('');
-
-    const harnessOptions = [
-      { id: 'claude-code', label: 'Claude Code CLI harness (npx @anthropic-ai/claude-code)' },
-      { id: 'zo', label: 'ZO Sovereign Framework Harness (cli/zo.js)' },
-      { id: 'gemini-cli', label: 'Gemini Agent Core CLI (gemini-cli)' },
-      { id: 'mock', label: 'Mock Execution CLI wrapper (mock)' }
-    ].map(h => `
-      <option value="${h.id}" ${agent.harness === h.id ? 'selected' : ''}>${h.label}</option>
-    `).join('');
-
-    const structuralRoles = [
-      { id: 'thinker', label: '🧠 Thinker — Planner swarm director' },
-      { id: 'reviewer', label: '🛡️ Reviewer — QA & Security gate checker' },
-      { id: 'worker', label: '🛠️ Worker — Standard tasks compiler' }
-    ].map(r => `
-      <option value="${r.id}" ${agent.structuralRole === r.id ? 'selected' : ''}>${r.label}</option>
-    `).join('');
-
-    const supervisorOptions = `<option value="">None (Supervised by Operator)</option>` + agentKeys.filter(k => k !== selectedAgentKey).map(k => `
-      <option value="${k}" ${agent.manager === k ? 'selected' : ''}>${STATE.config.agents[k].roleName} (${k})</option>
-    `).join('');
-
-    const toolsRegistry = STATE.config.toolsRegistry || [];
-    const toolsList = toolsRegistry.map(t => {
-      const active = agent.tools && agent.tools.includes(t.id);
-      return `
-        <label style="display:flex; align-items:flex-start; gap:8px; font-size:12px; color:var(--text-secondary); cursor:pointer; margin-bottom: 6px;">
-          <input type="checkbox" class="agent-tool-cb" value="${t.id}" ${active ? 'checked' : ''} style="accent-color:var(--indigo-400); margin-top:2px;" />
-          <div>
-            <strong style="color:var(--text-primary);">${t.name}</strong>
-            <div style="font-size:10px; color:var(--text-muted);">${t.description}</div>
-          </div>
-        </label>
-      `;
-    }).join('');
-
-    const teamCards = STATE.config.org.teams.map(t => {
-      const memberChips = t.members.map(m => {
-        const ag = STATE.config.agents[m];
-        if (!ag) return '';
-        const roleIcon = ag.structuralRole === 'thinker' ? '🧠 Planner' : (ag.structuralRole === 'reviewer' ? '🛡️ Auditor' : '🛠️ Worker');
-        const supervisorLabel = ag.manager ? `<span style="color:var(--text-muted); font-size:9px;"> (Reports to: ${ag.manager})</span>` : '';
-        return `
-          <div style="font-size:11px; padding:6px 10px; background:rgba(255,255,255,0.02); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); margin:4px; display:flex; justify-content:space-between; align-items:center; width:100%;">
-            <span><strong style="color:var(--text-primary);">${ag.roleName}</strong>${supervisorLabel}</span>
-            <span class="tag tag-repo" style="font-size:9px;">${roleIcon}</span>
-          </div>`;
-      }).join('');
-
-      return `
-        <div class="ws-deep-card" style="margin-bottom:16px; background: rgba(20,23,32,0.4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding:14px;">
-          <div style="font-weight:600; color:var(--text-primary); font-size:12px; margin-bottom:4px; display:flex; align-items:center; gap:6px;">
-            <span style="color:var(--indigo-400);">⊞</span> ${t.name}
-          </div>
-          <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.03); padding-bottom:6px;">
-            Parent Team: ${t.parent ? STATE.config.org.teams.find(x => x.id === t.parent)?.name : 'Root level'}
-          </div>
-          <div style="display:flex; flex-direction:column; gap:4px;">${memberChips}</div>
-        </div>
-      `;
-    }).join('');
-
-    panelHtml = `
-      <div class="fade-in" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px; align-items: start;">
-        
-        <!-- Left Side: Agent Configurator & Creation -->
-        <div style="display:flex; flex-direction:column; gap:24px;">
-          
-          <!-- Agent Editor Card -->
-          <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-              <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin:0;">👥 Agent Personality & Limits</h2>
-              <button class="btn btn-secondary" id="btn-toggle-new-agent" style="font-size:11px; padding:4px 10px;">➕ Add Agent</button>
-            </div>
-            
-            <!-- Dynamic Agent Selector -->
-            <div class="meta-field" style="margin-bottom: 16px;">
-              <label class="meta-label">Select Agent Profile</label>
-              <select id="agent-selector" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                ${agentOptions}
-              </select>
-            </div>
-
-            <!-- Agent Edit Form -->
-            <form id="zaf-agent-form" style="display:flex; flex-direction:column; gap:16px;">
-              <div class="meta-field">
-                <label class="meta-label">Assigned Role Name</label>
-                <input type="text" id="agent-name" required value="${agent.roleName}" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;" />
-              </div>
-
-              <div class="meta-field">
-                <label class="meta-label">Assigned Model Target preset</label>
-                <select id="agent-model" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                  ${modelOptions}
-                </select>
-              </div>
-
-              <div class="meta-field" id="custom-model-container">
-                <label class="meta-label">Custom Model String Specifier</label>
-                <input type="text" id="agent-custom-model" placeholder="e.g. claude-3-7-sonnet@latest" value="${agent.customModel || ''}" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;" />
-              </div>
-
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                <div class="meta-field">
-                  <label class="meta-label">Reasoning Level</label>
-                  <select id="agent-reasoning" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                    ${reasoningLevels}
-                  </select>
-                </div>
-                
-                <div class="meta-field">
-                  <label class="meta-label">Harness Tech / CLI</label>
-                  <select id="agent-harness" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                    ${harnessOptions}
-                  </select>
-                </div>
-              </div>
-
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:16px;">
-                <div class="meta-field">
-                  <label class="meta-label">Structural Planning Role</label>
-                  <select id="agent-struct-role" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                    ${structuralRoles}
-                  </select>
-                </div>
-                
-                <div class="meta-field">
-                  <label class="meta-label">Supervisor / Manager (N+1)</label>
-                  <select id="agent-manager" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 8px 12px; font-family: inherit; font-size: 12px; outline: none; width:100%;">
-                    ${supervisorOptions}
-                  </select>
-                </div>
-              </div>
-
-              <div class="meta-field">
-                <label class="meta-label" style="display:flex; justify-content:space-between;">
-                  <span>Heartbeat Interval Speed (Telemetry check frequency)</span>
-                  <span id="heartbeat-val" style="color:var(--indigo-400); font-family:monospace; font-weight:700;">${agent.heartbeat} seconds</span>
-                </label>
-                <div style="display:flex; align-items:center; gap:12px;">
-                  <input type="range" id="agent-heartbeat" min="5" max="180" value="${agent.heartbeat}" style="flex:1; accent-color:var(--indigo-400);" />
-                </div>
-              </div>
-
-              <div class="meta-field">
-                <label class="meta-label">Authorized Tools Roster</label>
-                <div style="display:flex; flex-direction:column; gap:6px; background:var(--bg-input); border:1px solid var(--border-medium); padding:12px 14px; border-radius:var(--radius-sm);">
-                  ${toolsList || '<span style="color:var(--text-muted);font-size:11px">No tools in registry. Register some below!</span>'}
-                </div>
-              </div>
-
-              <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-weight: 600; padding: 10px 16px; border-radius: var(--radius-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 8px;">
-                <span>💾</span> Save Personality & Limits
-              </button>
-            </form>
-          </div>
-
-          <!-- Create New Agent Drawer (Collapsed by default) -->
-          <div id="new-agent-drawer" class="hidden" style="background: var(--bg-card); border: 1px solid var(--indigo-500); border-radius: var(--radius-lg); padding: 24px; box-shadow: drop-shadow(0 0 10px rgba(99,102,241,0.25));">
-            <h2 style="font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span>➕ Build New Agent Ground-Up</span>
-              <span id="close-new-agent" style="cursor:pointer; color:var(--text-muted);">✕</span>
-            </h2>
-            <form id="zaf-create-agent-form" style="display:flex; flex-direction:column; gap:12px;">
-              <div class="meta-field">
-                <label class="meta-label">Unique Agent Key (alphanumeric ID)</label>
-                <input type="text" id="new-agent-key" required placeholder="e.g. backend-dev, security-audit" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-              </div>
-              <div class="meta-field">
-                <label class="meta-label">Role Name (title)</label>
-                <input type="text" id="new-agent-name" required placeholder="e.g. Senior Backend Architect" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-              </div>
-              <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-                <div class="meta-field">
-                  <label class="meta-label">Model Target</label>
-                  <select id="new-agent-model" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;">
-                    <option value="frontier">Frontier Preset</option>
-                    <option value="normal">Normal Preset</option>
-                    <option value="reasoning">Reasoning Preset</option>
-                  </select>
-                </div>
-                <div class="meta-field">
-                  <label class="meta-label">Harness Tech</label>
-                  <select id="new-agent-harness" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;">
-                    <option value="claude-code">Claude Code CLI</option>
-                    <option value="zo" selected>ZO Framework CLI</option>
-                    <option value="gemini-cli">Gemini Agent CLI</option>
-                    <option value="mock">Mock Engine</option>
-                  </select>
-                </div>
-              </div>
-              <button type="submit" class="btn btn-primary" style="margin-top: 8px; font-size: 12px; font-weight:600; padding:8px 12px;">Construct Dynamic Agent</button>
-            </form>
-          </div>
-        </div>
-
-        <!-- Right Side: Organization & Nested Team Builder, Tools Registry -->
-        <div style="display:flex; flex-direction:column; gap:24px;">
-          
-          <!-- Org Chart Section -->
-          <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
-            <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span>🔀 Organization Chart & Teams Hierarchy</span>
-              <button class="btn btn-secondary" id="btn-toggle-new-team" style="font-size:11px; padding:4px 10px;">➕ Create Team</button>
-            </h2>
-            
-            <div style="display:flex; flex-direction:column;">
-              ${teamCards}
-            </div>
-
-            <!-- Create Team Sub-form (Collapsed) -->
-            <div id="new-team-drawer" class="hidden" style="background: var(--bg-panel); border:1px solid var(--indigo-500); border-radius:var(--radius-md); padding:16px; margin-top:16px;">
-              <h3 style="font-size: 13px; font-weight:700; margin:0 0 12px; display:flex; justify-content:space-between;">
-                <span>➕ Construct New Nested Team</span>
-                <span id="close-new-team" style="cursor:pointer; color:var(--text-muted)">✕</span>
-              </h3>
-              <form id="zaf-create-team-form" style="display:flex; flex-direction:column; gap:10px;">
-                <div class="meta-field">
-                  <label class="meta-label">Unique Team ID</label>
-                  <input type="text" id="new-team-id" required placeholder="e.g. backend-team" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-                </div>
-                <div class="meta-field">
-                  <label class="meta-label">Team Display Name</label>
-                  <input type="text" id="new-team-name" required placeholder="e.g. Backend Services Team" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-                </div>
-                <div class="meta-field">
-                  <label class="meta-label">Parent Team Hierarchy</label>
-                  <select id="new-team-parent" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;">
-                    <option value="">None (Top level Org)</option>
-                    ${STATE.config.org.teams.map(t => `
-                      <option value="${t.id}">${t.name}</option>
-                    `).join('')}
-                  </select>
-                </div>
-                <div class="meta-field">
-                  <label class="meta-label">Select Members to Enroll</label>
-                  <div style="background: var(--bg-input); border: 1px solid var(--border-medium); padding:8px 10px; border-radius:var(--radius-sm); display:flex; flex-wrap:wrap; gap:8px;">
-                    ${agentKeys.map(k => `
-                      <label style="display:flex; align-items:center; gap:4px; font-size:11px; color:var(--text-secondary); cursor:pointer;">
-                        <input type="checkbox" class="team-member-cb" value="${k}" style="accent-color:var(--indigo-400);" />
-                        <span>${STATE.config.agents[k].roleName}</span>
-                      </label>
-                    `).join('')}
-                  </div>
-                </div>
-                <button type="submit" class="btn btn-primary" style="font-size:11px; padding:6px 12px; font-weight:600; width:100%;">Establish Team Swarm</button>
-              </form>
-            </div>
-          </div>
-
-          <!-- Tools Registry Section -->
-          <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
-            <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
-              <span>🛠️ Global Tools Registry & Capabilities</span>
-              <button class="btn btn-secondary" id="btn-toggle-new-tool" style="font-size:11px; padding:4px 10px;">➕ Register Tool</button>
-            </h2>
-
-            <div style="display:flex; flex-direction:column; gap:10px; margin-bottom:16px;">
-              ${toolsRegistry.map(t => `
-                <div style="background:rgba(255,255,255,0.02); border:1px solid var(--border-subtle); border-radius:var(--radius-sm); padding:10px 14px;">
-                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <span style="font-weight:700; color:var(--indigo-400); font-family:monospace; font-size:12px;">${t.id}</span>
-                    <span style="font-size:11px; font-weight:600; color:var(--text-primary);">${t.name}</span>
-                  </div>
-                  <div style="font-size:10px; color:var(--text-muted); line-height:1.4;">${t.description}</div>
-                </div>
-              `).join('')}
-            </div>
-
-            <!-- Create Tool Form (Collapsed) -->
-            <div id="new-tool-drawer" class="hidden" style="background: var(--bg-panel); border:1px solid var(--indigo-500); border-radius:var(--radius-md); padding:16px;">
-              <h3 style="font-size: 13px; font-weight:700; margin:0 0 12px; display:flex; justify-content:space-between;">
-                <span>➕ Register Custom CLI Capability Tool</span>
-                <span id="close-new-tool" style="cursor:pointer; color:var(--text-muted)">✕</span>
-              </h3>
-              <form id="zaf-register-tool-form" style="display:flex; flex-direction:column; gap:10px;">
-                <div class="meta-field">
-                  <label class="meta-label">Tool ID Keyword</label>
-                  <input type="text" id="new-tool-id" required placeholder="e.g. PyLinter, DockerCompose" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-                </div>
-                <div class="meta-field">
-                  <label class="meta-label">Tool Name</label>
-                  <input type="text" id="new-tool-name" required placeholder="e.g. Python Source Code Linter" style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-                </div>
-                <div class="meta-field">
-                  <label class="meta-label">Tool Capability Explanation & Bounds</label>
-                  <input type="text" id="new-tool-desc" required placeholder="Describe what actions the agent CLI is allowed to execute with this tool..." style="background: var(--bg-input); border: 1px solid var(--border-medium); color: var(--text-primary); border-radius: var(--radius-sm); padding: 6px 10px; font-family: inherit; font-size: 11px; outline: none; width:100%;" />
-                </div>
-                <button type="submit" class="btn btn-primary" style="font-size:11px; padding:6px 12px; font-weight:600; width:100%;">Enroll Dynamic Tool</button>
-              </form>
-            </div>
-          </div>
-        </div>
-      </div>`;
-  } else if (activeControlTab === 'usage') {
-    const limit = STATE.config.subscriptions.weeklyLimitHours;
-    const used = STATE.config.subscriptions.weeklyUsedHours;
-    const pct = ((used / limit) * 100).toFixed(2);
-
-    const projectRows = STATE.config.analytics.projects.map(p => `
-      <tr>
-        <td style="font-family:monospace; font-size:11px; color:var(--text-secondary); padding:8px 0;">${p.id}</td>
-        <td style="font-family:'JetBrains Mono', monospace; font-size:11px; color:var(--amber-400); text-align:right; padding:8px 0;">${p.tokensConsumed.toLocaleString()}</td>
-      </tr>
-    `).join('');
-
-    panelHtml = `
-      <div class="fade-in" style="display:grid; grid-template-columns: 1fr 1fr; gap:24px;">
-        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px; text-align:center; display:flex; flex-direction:column; align-items:center;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 20px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px; width:100%; text-align:left;">📊 Weekly Usage Quota (REAL TIME TELEMETRY)</h2>
-          
-          <div style="position:relative; width:180px; height:180px; display:flex; align-items:center; justify-content:center; margin-bottom:20px;">
-            <svg width="180" height="180" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="40" stroke="var(--border-medium)" stroke-width="6" fill="transparent" />
-              <circle cx="50" cy="50" r="40" stroke="var(--indigo-500)" stroke-width="6" fill="transparent" 
-                      stroke-dasharray="${2 * Math.PI * 40}" stroke-dashoffset="${2 * Math.PI * 40 * (1 - Math.min(used, limit) / limit)}" stroke-linecap="round"
-                      transform="rotate(-90 50 50)" style="filter: drop-shadow(0 0 4px rgba(99,102,241,0.4))" />
-            </svg>
-            <div style="position:absolute; text-align:center;">
-              <div style="font-size:20px; font-weight:700; color:var(--text-primary); font-family:'JetBrains Mono', monospace;">${pct}%</div>
-              <div style="font-size:10px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.05em; font-weight:600;">Consumed</div>
-            </div>
-          </div>
-
-          <div style="font-size:12px; color:var(--text-secondary); line-height:1.6; max-width:320px; text-align:center;">
-            Running under Move Capital Developer Suite. Telemetry accumulates run execution timings of local harness sidecars. You have consumed <strong style="color:var(--text-primary); font-family:monospace; font-size:13px;">${used.toFixed(5)} hours</strong> out of your <strong style="color:var(--text-primary); font-family:monospace; font-size:13px;">${limit} hours</strong> weekly budget.
-          </div>
-        </div>
-
-        <div style="background: var(--bg-card); border: 1px solid var(--border-subtle); border-radius: var(--radius-lg); padding: 24px;">
-          <h2 style="font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 16px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">🪙 Token Consumption per Project</h2>
-          <table style="width:100%; border-collapse:collapse; margin-top:8px;">
-            <thead>
-              <tr style="border-bottom:1px solid var(--border-subtle);">
-                <th style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:600; padding:8px 0; text-align:left;">Project / Repo</th>
-                <th style="font-size:10px; text-transform:uppercase; color:var(--text-muted); font-weight:600; padding:8px 0; text-align:right;">Tokens Consumed</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${projectRows}
-            </tbody>
-          </table>
-        </div>
-      </div>`;
-  }
-
-  container.innerHTML = `
-    <div class="view-deep-dive fade-in" style="padding: 24px; max-width: 1100px;">
-      <div class="section-header" style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 24px;">
-        <h1 style="font-size:20px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px; margin: 0;">
-          <span>⚙️</span> ZAF Sovereign Control Center
-        </h1>
-        <div style="display:flex; gap:8px; background:var(--bg-panel); border:1px solid var(--border-subtle); padding:4px; border-radius:var(--radius-md);">
-          ${tabsHtml}
-        </div>
       </div>
 
-      <div id="control-active-panel">
-        ${panelHtml}
+      <div class="zaf-control-card">
+        <h2>Tools Registry</h2>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          ${tools.map(t => `
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:var(--radius-sm);padding:10px 14px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                <span style="font-weight:700;color:var(--indigo-400);font-family:'JetBrains Mono',monospace;font-size:12px;">${t.id}</span>
+                <span style="font-size:11px;font-weight:600;color:var(--text-primary);">${t.name}</span>
+              </div>
+              <div style="font-size:10px;color:var(--text-muted);line-height:1.4;">${safeHTML(t.description)}</div>
+            </div>`).join('')}
+        </div>
+        <form id="tool-form" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
+          <h2 style="margin-top:4px">Register Tool</h2>
+          <div class="zaf-field"><label>Tool ID</label><input id="new-tool-id" placeholder="e.g. DockerCompose" required /></div>
+          <div class="zaf-field"><label>Display Name</label><input id="new-tool-name" placeholder="Docker Compose orchestrator" required /></div>
+          <div class="zaf-field"><label>Capability description & bounds</label><textarea id="new-tool-desc" rows="3" required></textarea></div>
+          <button type="submit" class="zaf-btn">Enroll Tool</button>
+        </form>
+      </div>
+    </div>`;
+}
+
+function wireAgentEditor(container) {
+  const selector = container.querySelector('#agent-selector');
+  selector?.addEventListener('change', () => { STATE.selectedAgentKey = selector.value; renderControl(container); });
+
+  const slider = container.querySelector('#agent-heartbeat');
+  const sliderVal = container.querySelector('#heartbeat-val');
+  slider?.addEventListener('input', () => { sliderVal.textContent = `${slider.value} seconds`; });
+
+  const personaPreview = container.querySelector('#persona-preview');
+  const updatePersona = () => {
+    const id = container.querySelector('#agent-struct-role').value;
+    const p = STRUCTURAL_PERSONAS[id];
+    if (!p) return;
+    personaPreview.textContent =
+`STRUCTURAL ROLE: ${p.label}
+─────────────────────────────────
+PERSONA INSTRUCTION:
+${p.persona}
+
+OPERATIONAL BOUNDS:
+${p.bounds}`;
+  };
+  container.querySelector('#agent-struct-role')?.addEventListener('change', updatePersona);
+  updatePersona();
+
+  // When harness changes, update model dropdown options
+  const harnessSel = container.querySelector('#agent-harness');
+  const modelSel   = container.querySelector('#agent-modelid');
+  const updateModelDropdown = () => {
+    if (!modelSel || !harnessSel) return;
+    const h = harnessSel.value;
+    const models = HARNESS_MODEL_IDS[h];
+    if (!models) {
+      modelSel.innerHTML = '<option value="" disabled>N/A for this harness</option>';
+      modelSel.disabled = true;
+    } else {
+      modelSel.disabled = false;
+      modelSel.innerHTML = models.map(m => `<option value="${m.id}">${m.id} — ${m.label}</option>`).join('');
+    }
+    updateReasoningNote();
+    updateRecBadge();
+  };
+  harnessSel?.addEventListener('change', updateModelDropdown);
+
+  // Update reasoning note when harness changes
+  const updateReasoningNote = () => {
+    const noteEl = container.querySelector('.reasoning-note');
+    if (!noteEl || !harnessSel) return;
+    const h = harnessSel.value;
+    if (h === 'claude-code' || h === 'claude') {
+      noteEl.textContent = 'Injected via /thinking budget command at T+2s before seed (high=10000, medium=3000, low=0).';
+    } else if (h === 'codex') {
+      noteEl.textContent = 'Codex does not support configurable reasoning level — dropdown has no effect.';
+    } else {
+      noteEl.textContent = '';
+    }
+  };
+
+  // Update recommended badge when structural role changes
+  const updateRecBadge = () => {
+    const structRoleSel = container.querySelector('#agent-struct-role');
+    const recBadge = container.querySelector('.rec-badge');
+    if (!structRoleSel || !recBadge) return;
+    const rec = ROLE_RECOMMENDATIONS[structRoleSel.value];
+    if (rec) recBadge.textContent = rec.label;
+  };
+  container.querySelector('#agent-struct-role')?.addEventListener('change', updateRecBadge);
+
+  // Use recommended button
+  container.querySelector('#use-recommended-btn')?.addEventListener('click', () => {
+    const structRoleSel = container.querySelector('#agent-struct-role');
+    const rec = ROLE_RECOMMENDATIONS[structRoleSel?.value];
+    if (!rec) return;
+    if (modelSel) modelSel.value = rec.modelId;
+    const reasoningSel = container.querySelector('#agent-reasoning');
+    if (reasoningSel) reasoningSel.value = rec.reasoning;
+  });
+
+  // CLI probe (in Advanced section)
+  container.querySelector('#cli-probe-btn')?.addEventListener('click', async () => {
+    const harness = harnessSel?.value || 'claude-code';
+    const statusEl = container.querySelector('#cli-probe-status');
+    const resultEl = container.querySelector('#cli-probe-result');
+    statusEl.textContent = `Probing ${harness} …`;
+    try {
+      const cached = STATE.cliDiscoveryCache[harness];
+      const r = cached || await fetch('/api/cli/discover?harness=' + encodeURIComponent(harness)).then(r => r.json());
+      STATE.cliDiscoveryCache[harness] = r;
+      statusEl.textContent = `Probed ${harness}.`;
+      resultEl.style.display = 'block';
+      const modelPills = r.models?.length ? r.models.slice(0, 24).map(m => `<span class="disc-pill">${m}</span>`).join('') : '<em>none parsed</em>';
+      const flagPills  = r.flags?.length ? r.flags.slice(0, 30).map(f => `<span class="disc-pill">${safeHTML(f)}</span>`).join('') : '<em>none parsed</em>';
+      resultEl.innerHTML = `
+        <div><span class="disc-status ${r.ok?'ok':'fail'}">${r.ok?'OK':'WARN'}</span><strong>${harness}</strong> — capabilities discovered from <code>--help</code></div>
+        <div class="disc-section">Models</div>${modelPills}
+        <div class="disc-section">Flags</div>${flagPills}
+        <div class="disc-section">Raw output (first 400 chars)</div>
+        <pre style="font-size:10px;color:var(--text-muted);white-space:pre-wrap">${safeHTML((r.raw||'').slice(0, 400))}</pre>`;
+    } catch (err) {
+      statusEl.textContent = 'Probe failed: ' + err.message;
+    }
+  });
+
+  // Save form
+  container.querySelector('#zaf-agent-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const key = selector.value;
+    const c = STATE.config.agents[key];
+    c.roleName       = container.querySelector('#agent-name').value;
+    c.personality    = container.querySelector('#agent-personality')?.value || '';
+    c.modelId        = container.querySelector('#agent-modelid')?.value || '';
+    c.reasoning      = container.querySelector('#agent-reasoning').value;
+    c.harness        = harnessSel?.value || 'mock';
+    c.harnesses      = Array.from(container.querySelectorAll('.agent-harness-cb:checked')).map(cb => cb.value);
+    if (!c.harnesses.length) c.harnesses = [c.harness];
+    if (!c.harnesses.includes(c.harness)) c.harness = c.harnesses[0];
+    c.structuralRole = container.querySelector('#agent-struct-role').value;
+    c.manager        = container.querySelector('#agent-manager').value || null;
+    c.heartbeat      = parseInt(slider?.value || '40', 10);
+    c.tools          = Array.from(container.querySelectorAll('.agent-tool-cb:checked')).map(cb => cb.value);
+    await persistConfig();
+    alert('Saved ' + c.roleName);
+    renderControl(container);
+  });
+
+  // Tool registration
+  container.querySelector('#tool-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const id = container.querySelector('#new-tool-id').value.replace(/[^a-zA-Z0-9]/g, '');
+    const name = container.querySelector('#new-tool-name').value;
+    const description = container.querySelector('#new-tool-desc').value;
+    if (!id) return alert('Tool ID must be alphanumeric');
+    STATE.config.toolsRegistry = STATE.config.toolsRegistry || [];
+    if (STATE.config.toolsRegistry.find(t => t.id === id)) return alert('Tool ID exists');
+    STATE.config.toolsRegistry.push({ id, name, description });
+    await persistConfig();
+    renderControl(container);
+  });
+}
+
+async function persistConfig() {
+  const r = await fetch('/api/config/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(STATE.config) });
+  if (!r.ok) alert('Config save failed: HTTP ' + r.status);
+}
+
+// ---- Usage / Agent Activity ----
+function renderControlUsage() {
+  const agentUsage = STATE.config.agentUsage || {};
+  const harnessUsage = STATE.config.harnessUsage || {};
+  const audit = STATE.audit || [];
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const weekAgo  = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const runsToday = audit.filter(e => e.kind === 'process.spawn' && e.ts && e.ts.startsWith(todayStr)).length;
+  const runsWeek  = audit.filter(e => e.kind === 'process.spawn' && e.ts && new Date(e.ts).getTime() >= weekAgo).length;
+
+  const agentRows = Object.entries(agentUsage).map(([role, u]) => {
+    const avgDur = u.runs > 0 ? (u.secondsTotal / u.runs).toFixed(1) : '—';
+    const lastRun = u.lastRun ? new Date(u.lastRun).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : '—';
+    return `<tr>
+      <td style="color:var(--text-primary);font-family:monospace">${safeHTML(role)}</td>
+      <td style="color:var(--text-muted)">${safeHTML(u.harness || '—')}</td>
+      <td style="color:var(--text-secondary)">${u.runs}</td>
+      <td style="color:var(--text-secondary)">${avgDur}s</td>
+      <td style="color:var(--text-muted);font-size:10px">${lastRun}</td>
+    </tr>`;
+  }).join('');
+
+  const harnessRows = Object.entries(harnessUsage).map(([h, u]) => {
+    const rate = u.runs > 0 ? ((u.successes / u.runs) * 100).toFixed(0) : '—';
+    return `<tr>
+      <td style="color:var(--text-primary);font-family:monospace">${safeHTML(h)}</td>
+      <td style="color:var(--text-secondary)">${u.runs}</td>
+      <td style="color:${rate >= 80 ? 'var(--green-400)' : rate >= 50 ? 'var(--amber-400)' : 'var(--red-400)'}">${rate}%</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="zaf-control-grid">
+      <div class="zaf-control-card">
+        <h2>Agent Activity</h2>
+        <div style="display:flex;gap:32px;margin-bottom:18px">
+          <div style="text-align:center">
+            <div style="font-size:28px;font-weight:700;color:var(--indigo-400)">${runsToday}</div>
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Runs Today</div>
+          </div>
+          <div style="text-align:center">
+            <div style="font-size:28px;font-weight:700;color:var(--indigo-400)">${runsWeek}</div>
+            <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">Runs This Week</div>
+          </div>
+        </div>
+        <h3 style="font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:8px">Per Agent Role</h3>
+        ${agentRows ? `<table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="color:var(--text-muted);font-size:10px">
+            <th style="text-align:left;padding:4px 6px">Role</th>
+            <th style="text-align:left;padding:4px 6px">Harness</th>
+            <th style="text-align:left;padding:4px 6px">Runs</th>
+            <th style="text-align:left;padding:4px 6px">Avg Dur</th>
+            <th style="text-align:left;padding:4px 6px">Last Run</th>
+          </tr></thead>
+          <tbody>${agentRows}</tbody>
+        </table>` : '<div style="color:var(--text-muted);font-size:11px">No agent runs recorded yet.</div>'}
+      </div>
+      <div class="zaf-control-card">
+        <h2>Per-Harness Success Rate</h2>
+        ${harnessRows ? `<table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead><tr style="color:var(--text-muted);font-size:10px">
+            <th style="text-align:left;padding:4px 6px">Harness</th>
+            <th style="text-align:left;padding:4px 6px">Runs</th>
+            <th style="text-align:left;padding:4px 6px">Success Rate</th>
+          </tr></thead>
+          <tbody>${harnessRows}</tbody>
+        </table>` : '<div style="color:var(--text-muted);font-size:11px">No harness data yet. Runs will populate this automatically.</div>'}
+      </div>
+    </div>`;
+}
+
+// =========================================================================
+// CONTROL: CLI Hub (TKT-ZAF-0019)
+// =========================================================================
+
+const CLI_HUB_HARNESSES = [
+  { id: 'claude-code', label: 'Claude Code', installCmd: 'npm install -g @anthropic-ai/claude-code', authCmd: 'npx -y @anthropic-ai/claude-code' },
+  { id: 'codex',       label: 'Codex',       installCmd: 'npm install -g @openai/codex',            authCmd: 'npx -y @openai/codex' },
+  { id: 'antigravity', label: 'Antigravity', installCmd: 'npm install -g @google/antigravity',      authCmd: 'npx -y @google/antigravity' },
+  { id: 'aider',       label: 'Aider',       installCmd: 'pipx install aider-chat',                  authCmd: 'aider' },
+  { id: 'goose',       label: 'Goose',       installCmd: 'pipx install goose-ai',                    authCmd: 'goose' },
+  { id: 'amp',         label: 'Amp',         installCmd: 'npm install -g @sourcegraph/amp',          authCmd: 'npx -y @sourcegraph/amp' },
+];
+
+function getCliHarnessSpec(id) {
+  const custom = (STATE.config?.customHarnesses || []).find(h => h.id === id);
+  if (custom) return { id: custom.id, label: custom.displayName, installCmd: custom.installCmd, authCmd: custom.authCmd };
+  return CLI_HUB_HARNESSES.find(h => h.id === id);
+}
+
+function renderControlCliHub() {
+  const conf = STATE.config || {};
+  const customHarnesses = conf.customHarnesses || [];
+  const agentUsage = conf.agentUsage || {};
+  const github = conf.github || {};
+
+  const allHarnesses = [
+    ...CLI_HUB_HARNESSES,
+    ...customHarnesses.map(h => ({ id: h.id, label: h.displayName, installCmd: h.installCmd || '', authCmd: h.authCmd || '', isCustom: true })),
+  ];
+
+  const cardsHtml = allHarnesses.map(h => {
+    const usage = agentUsage[h.id] || {};
+    const lastRun = usage.lastRun ? new Date(usage.lastRun).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Never';
+    const statusInfo = STATE.cliHubStatus[h.id];
+    const connected = STATE.cliHubConnected[h.id];
+
+    let installBadge, installBadgeClass;
+    if (statusInfo === undefined) {
+      installBadge = '⋯ Checking…'; installBadgeClass = 'checking';
+    } else if (statusInfo.installed) {
+      installBadge = `✓ ${safeHTML(statusInfo.version || 'Installed')}`; installBadgeClass = 'installed';
+    } else {
+      installBadge = '✗ Not installed'; installBadgeClass = 'not-installed';
+    }
+
+    return `
+      <div class="zaf-cli-card" id="cli-card-${h.id}" data-harness-id="${h.id}">
+        <div class="cli-card-header">
+          <span class="cli-card-name">${safeHTML(h.label)}</span>
+          <div class="cli-card-badges">
+            <span class="cli-status-badge ${installBadgeClass}" id="cli-badge-install-${h.id}">${installBadge}</span>
+            <span class="cli-status-badge ${connected ? 'auth-connected' : 'auth-unknown'}" id="cli-badge-auth-${h.id}">${connected ? `Connected ✓ ${safeHTML(connected)}` : 'Auth: Unknown'}</span>
+          </div>
+        </div>
+        <div class="cli-card-last-run">Last run: ${safeHTML(lastRun)}</div>
+        <div class="cli-security-warning">⚠ Only install from verified sources. ZAF does not audit packages.</div>
+        <div class="cli-install-row">
+          <input class="cli-install-cmd-input" id="cli-install-cmd-${h.id}" value="${safeHTML(h.installCmd)}" placeholder="Install command…" />
+          <button class="zaf-btn" id="cli-install-btn-${h.id}" data-harness="${h.id}">Install</button>
+        </div>
+        <div class="cli-pty-host-wrap" id="cli-pty-install-wrap-${h.id}" style="display:none;margin-top:8px;">
+          <div id="cli-pty-install-${h.id}" style="height:220px;background:#0a0a0f;border-radius:4px;overflow:hidden;"></div>
+        </div>
+        <div class="cli-connect-row">
+          <button class="zaf-btn secondary" id="cli-connect-btn-${h.id}" data-harness="${h.id}">Connect / Auth</button>
+        </div>
+        <div class="cli-cred-note">Credentials stored unencrypted by CLI (~/.claude etc). Never read by ZAF.</div>
+        <div class="cli-pty-host-wrap" id="cli-pty-connect-wrap-${h.id}" style="display:none;margin-top:8px;">
+          <div id="cli-pty-connect-${h.id}" style="height:220px;background:#0a0a0f;border-radius:4px;overflow:hidden;"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  const githubHtml = `
+    <div class="zaf-control-card" style="margin-top:24px">
+      <h2>Git Identity &amp; Remote</h2>
+      <form id="zaf-github-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div class="zaf-field"><label>Git Name</label>
+          <input id="gh-name" value="${safeHTML(github.name || '')}" placeholder="Nassau-1" />
+        </div>
+        <div class="zaf-field"><label>Git Email</label>
+          <input id="gh-email" type="email" value="${safeHTML(github.email || '')}" placeholder="you@example.com" />
+        </div>
+        <div class="zaf-field"><label>Default Remote</label>
+          <input id="gh-remote" value="${safeHTML(github.defaultRemote || 'origin')}" />
+        </div>
+        <div class="zaf-field"><label>Auth Method</label>
+          <select id="gh-auth-method">
+            <option value="ssh" ${github.authMethod === 'ssh' ? 'selected' : ''}>SSH Key</option>
+            <option value="pat" ${github.authMethod === 'pat' ? 'selected' : ''}>Personal Access Token (PAT)</option>
+          </select>
+        </div>
+        <div class="zaf-field" id="gh-ssh-row" style="${github.authMethod === 'pat' ? 'display:none' : ''}">
+          <label>SSH Key Path</label>
+          <input id="gh-ssh-path" value="${safeHTML(github.sshKeyPath || '')}" placeholder="~/.ssh/id_ed25519" />
+        </div>
+        <div class="zaf-field" id="gh-pat-row" style="${github.authMethod !== 'pat' ? 'display:none' : ''}">
+          <label>Personal Access Token</label>
+          <input id="gh-pat" type="password" value="" placeholder="${github.pat ? '••••• (stored, enter new to replace)' : 'ghp_…'}" />
+        </div>
+        <div style="grid-column:1/3;display:flex;align-items:center;gap:12px;">
+          <button type="submit" class="zaf-btn">Save Git Config</button>
+          <span id="gh-save-status" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+      </form>
+    </div>`;
+
+  const addCustomHtml = `
+    <div class="zaf-control-card" style="margin-top:24px">
+      <h2>Add Custom Harness</h2>
+      <form id="zaf-custom-harness-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div class="zaf-field"><label>Display Name</label><input id="ch-name" required placeholder="My CLI" /></div>
+        <div class="zaf-field"><label>Version Check Command</label><input id="ch-version-cmd" required placeholder="mycli --version" /></div>
+        <div class="zaf-field" style="grid-column:1/3"><label>Install Command</label><input id="ch-install-cmd" placeholder="npm install -g mycli" /></div>
+        <div class="zaf-field" style="grid-column:1/3"><label>Auth Command (optional)</label><input id="ch-auth-cmd" placeholder="mycli auth login" /></div>
+        <div class="zaf-field" style="grid-column:1/3"><label>Default Model IDs (comma-separated)</label><input id="ch-model-ids" placeholder="gpt-4o, claude-sonnet-4-6" /></div>
+        <div style="grid-column:1/3;display:flex;align-items:center;gap:12px;">
+          <button type="submit" class="zaf-btn">Add Harness</button>
+          <span id="ch-status" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+      </form>
+    </div>`;
+
+  return `
+    <div class="zaf-cli-hub fade-in">
+      <div class="zaf-cli-hub-header">
+        <div class="zaf-overview-title"><div class="accent-bar"></div>CLI Hub</div>
+        <div class="zaf-overview-sub">Install, authenticate, and configure CLI harnesses for agent runs.</div>
+      </div>
+      <div class="zaf-cli-grid">${cardsHtml}</div>
+      ${githubHtml}
+      ${addCustomHtml}
+    </div>`;
+}
+
+function wireCliHub(container) {
+  const conf = STATE.config || {};
+  const customHarnesses = conf.customHarnesses || [];
+  const allIds = [...CLI_HUB_HARNESSES.map(h => h.id), ...customHarnesses.map(h => h.id)];
+
+  // Kick off status checks for harnesses not yet checked
+  for (const id of allIds) {
+    if (STATE.cliHubStatus[id] === undefined) {
+      STATE.cliHubStatus[id] = null; // mark as in-flight
+      fetch(`/api/cli/status?harness=${encodeURIComponent(id)}`)
+        .then(r => r.json())
+        .then(data => {
+          STATE.cliHubStatus[id] = data;
+          const badge = document.getElementById(`cli-badge-install-${id}`);
+          if (badge) {
+            badge.textContent = data.installed ? `✓ ${data.version || 'Installed'}` : '✗ Not installed';
+            badge.className = `cli-status-badge ${data.installed ? 'installed' : 'not-installed'}`;
+          }
+        })
+        .catch(() => {
+          STATE.cliHubStatus[id] = { installed: false };
+          const badge = document.getElementById(`cli-badge-install-${id}`);
+          if (badge) { badge.textContent = '✗ Not installed'; badge.className = 'cli-status-badge not-installed'; }
+        });
+    }
+  }
+
+  // Install buttons
+  container.querySelectorAll('[id^="cli-install-btn-"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const harnessId = btn.dataset.harness;
+      const cmdInput = document.getElementById(`cli-install-cmd-${harnessId}`);
+      const rawCmd = cmdInput?.value?.trim() || '';
+      if (!rawCmd) return;
+      const tokens = rawCmd.split(/\s+/);
+      const [cmd, ...args] = tokens;
+      const wrapEl = document.getElementById(`cli-pty-install-wrap-${harnessId}`);
+      if (wrapEl) wrapEl.style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Installing…';
+      try {
+        const r = await fetch('/api/pty/inline', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cmd, args, label: `Install ${harnessId}`, harnessId, kind: 'cli-hub-install' }),
+        });
+        const data = await r.json();
+        if (data.processId) {
+          STATE.cliHubProcesses.set(data.processId, { harnessId, kind: 'install' });
+          const hostEl = document.getElementById(`cli-pty-install-${harnessId}`);
+          if (hostEl) initXtermInElement(data.processId, hostEl);
+        } else {
+          btn.disabled = false; btn.textContent = 'Install';
+        }
+      } catch (err) {
+        btn.disabled = false; btn.textContent = 'Install';
+        alert('Failed to spawn install: ' + err.message);
+      }
+    });
+  });
+
+  // Connect buttons
+  container.querySelectorAll('[id^="cli-connect-btn-"]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const harnessId = btn.dataset.harness;
+      const spec = getCliHarnessSpec(harnessId);
+      if (!spec?.authCmd) { alert('No auth command configured for ' + harnessId); return; }
+      const tokens = spec.authCmd.split(/\s+/);
+      const [cmd, ...args] = tokens;
+      const wrapEl = document.getElementById(`cli-pty-connect-wrap-${harnessId}`);
+      if (wrapEl) wrapEl.style.display = 'block';
+      btn.disabled = true; btn.textContent = 'Authenticating…';
+      try {
+        const r = await fetch('/api/pty/inline', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cmd, args, label: `Connect ${harnessId}`, harnessId, kind: 'cli-hub-connect' }),
+        });
+        const data = await r.json();
+        if (data.processId) {
+          STATE.cliHubProcesses.set(data.processId, { harnessId, kind: 'connect' });
+          const hostEl = document.getElementById(`cli-pty-connect-${harnessId}`);
+          if (hostEl) initXtermInElement(data.processId, hostEl);
+        } else {
+          btn.disabled = false; btn.textContent = 'Connect / Auth';
+        }
+      } catch (err) {
+        btn.disabled = false; btn.textContent = 'Connect / Auth';
+        alert('Failed to spawn connect: ' + err.message);
+      }
+    });
+  });
+
+  // GitHub form
+  container.querySelector('#zaf-github-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = container.querySelector('#gh-name').value.trim();
+    const email = container.querySelector('#gh-email').value.trim();
+    const defaultRemote = container.querySelector('#gh-remote').value.trim();
+    const authMethod = container.querySelector('#gh-auth-method').value;
+    const sshKeyPath = container.querySelector('#gh-ssh-path')?.value.trim() || '';
+    const pat = container.querySelector('#gh-pat')?.value || '';
+    const statusEl = container.querySelector('#gh-save-status');
+    statusEl.textContent = 'Saving…';
+    try {
+      const r = await fetch('/api/config/github', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, defaultRemote, authMethod, sshKeyPath, ...(pat ? { pat } : {}) }),
+      });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      statusEl.textContent = '✓ Saved — git config updated';
+      STATE.config = STATE.config || {};
+      STATE.config.github = STATE.config.github || {};
+      if (name)          STATE.config.github.name = name;
+      if (email)         STATE.config.github.email = email;
+      if (defaultRemote) STATE.config.github.defaultRemote = defaultRemote;
+      if (authMethod)    STATE.config.github.authMethod = authMethod;
+      if (sshKeyPath)    STATE.config.github.sshKeyPath = sshKeyPath;
+      if (pat)           STATE.config.github.pat = '•stored•';
+      const patInput = container.querySelector('#gh-pat');
+      if (patInput) patInput.value = '';
+    } catch (err) {
+      statusEl.textContent = '✗ Failed: ' + err.message;
+    }
+  });
+
+  container.querySelector('#gh-auth-method')?.addEventListener('change', (e) => {
+    const sshRow = container.querySelector('#gh-ssh-row');
+    const patRow = container.querySelector('#gh-pat-row');
+    if (sshRow) sshRow.style.display = e.target.value === 'ssh' ? '' : 'none';
+    if (patRow) patRow.style.display = e.target.value === 'pat' ? '' : 'none';
+  });
+
+  // Custom harness form
+  container.querySelector('#zaf-custom-harness-form')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const displayName = container.querySelector('#ch-name').value.trim();
+    const versionCmd = container.querySelector('#ch-version-cmd').value.trim();
+    const installCmd = container.querySelector('#ch-install-cmd').value.trim();
+    const authCmd = container.querySelector('#ch-auth-cmd').value.trim();
+    const modelIds = container.querySelector('#ch-model-ids').value.trim();
+    const statusEl = container.querySelector('#ch-status');
+    statusEl.textContent = 'Saving…';
+    try {
+      const r = await fetch('/api/harness/custom', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ displayName, versionCmd, installCmd, authCmd, modelIds }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'HTTP ' + r.status);
+      statusEl.textContent = `✓ Added harness "${safeHTML(displayName)}" (${data.id})`;
+      const cr = await fetch('/api/config');
+      if (cr.ok) STATE.config = await cr.json();
+      const controlEl = document.getElementById('content');
+      if (controlEl && STATE.currentView === 'control') renderControl(controlEl);
+    } catch (err) {
+      statusEl.textContent = '✗ Failed: ' + err.message;
+    }
+  });
+}
+
+// =========================================================================
+// VIEW: ORG / TEAM BUILDER (drag-and-drop SVG)
+// =========================================================================
+
+function renderOrg(container) {
+  if (!STATE.config) {
+    container.innerHTML = `<div style="padding:40px;color:var(--text-muted)">Loading config…</div>`;
+    fetch('/api/config').then(r => r.json()).then(c => { STATE.config = c; renderOrg(container); }).catch(() => {});
+    return;
+  }
+
+  STATE.config.org = STATE.config.org || { name:'Org', teams: [] };
+  STATE.config.org.teams = STATE.config.org.teams || [];
+  // Per-team position state (kept in config so it persists)
+  STATE.config.org.layout = STATE.config.org.layout || {};
+
+  container.innerHTML = `
+    <div class="zaf-org-wrap fade-in">
+      <div class="zaf-org-canvas-wrap">
+        <div class="zaf-org-toolbar">
+          <button class="zaf-btn" id="org-add-team">+ Team</button>
+          <button class="zaf-btn secondary" id="org-add-agent">+ Agent</button>
+          <button class="zaf-btn secondary" id="org-fit">Fit</button>
+          <button class="zaf-btn secondary" id="org-save">Save Layout</button>
+        </div>
+        <svg class="zaf-org-canvas" id="org-canvas" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="zaf-org-help">
+          Drag team boxes to reposition · Drag agent chips between teams to reassign · Click to select & edit on the right.
+        </div>
+      </div>
+      <div class="zaf-org-side" id="org-side">
+        <h3>Inspector</h3>
+        <div id="org-inspector"><div style="color:var(--text-muted);font-size:11px">Select a team or agent to edit.</div></div>
       </div>
     </div>`;
 
-  // --- TAB CLICK HANDLERS ---
-  container.querySelectorAll('.control-tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      activeControlTab = btn.dataset.tab;
-      renderControl(container);
-    });
+  drawOrgCanvas();
+  bindOrgInteractions(container);
+}
+
+function drawOrgCanvas() {
+  const svg = document.getElementById('org-canvas');
+  if (!svg) return;
+  const org = STATE.config.org;
+  const agents = STATE.config.agents || {};
+  const teams = org.teams;
+  const layout = org.layout;
+
+  // Initial layout: tile teams that lack coords
+  const TEAM_W = 280, TEAM_H = 240, MARGIN_X = 320, MARGIN_Y = 280;
+  teams.forEach((t, i) => {
+    if (!layout[t.id]) {
+      const col = i % 4, row = Math.floor(i/4);
+      layout[t.id] = { x: 60 + col*MARGIN_X, y: 60 + row*MARGIN_Y };
+    }
   });
 
-  // --- TICKET BUILDER HANDLERS ---
-  const tktRepo = container.querySelector('#tkt-repo');
-  if (tktRepo) {
-    const updateSelectors = () => {
-      const repo = tktRepo.value;
-      const phaseSel = container.querySelector('#tkt-phase');
-      const wsSel = container.querySelector('#tkt-workstream');
-      if (!phaseSel || !wsSel) return;
-      
-      if (repo === 'zo') {
-        phaseSel.innerHTML = `
-          <option value="P0">Phase 0 — Baseline Lock</option>
-          <option value="P1" selected>Phase 1 — Design Lock</option>
-          <option value="P2">Phase 2 — Shell V1</option>
-          <option value="P3">Phase 3 — Services & Data Stabilisation</option>
-          <option value="P4">Phase 4 — Dual-Import</option>
-          <option value="P5">Phase 5 — Attio Cutover</option>
-          <option value="P6">Phase 6 — Intelligence Layer</option>
-        `;
-        wsSel.innerHTML = `
-          <option value="WS-UX" selected>WS-UX — UX & Design</option>
-          <option value="WS-SHELL">WS-SHELL — Platform Shell</option>
-          <option value="WS-DATA">WS-DATA — Data Layer</option>
-          <option value="WS-SERVICES">WS-SERVICES — Services Stabilisation</option>
-          <option value="WS-CRM">WS-CRM — CRM Transition</option>
-          <option value="WS-INTELLIGENCE">WS-INTELLIGENCE — Intelligence Layer</option>
-          <option value="WS-ASSISTANT">WS-ASSISTANT — ZO Assistant</option>
-          <option value="WS-REPOS">WS-REPOS — Repo Rationalisation</option>
-        `;
-      } else {
-        phaseSel.innerHTML = `
-          <option value="P1">Phase 1 — Multi-Repo Dashboard</option>
-          <option value="P2">Phase 2 — Framework Documentation</option>
-          <option value="P3">Phase 3 — CLI Integration</option>
-          <option value="P4" selected>Phase 4 — Unified Control</option>
-        `;
-        wsSel.innerHTML = `
-          <option value="WS-CLI">WS-CLI — CLI harness</option>
-          <option value="WS-DASHBOARD">WS-DASHBOARD — Dashboard core</option>
-          <option value="WS-UX" selected>WS-UX — Premium styling</option>
-          <option value="WS-DOCS">WS-DOCS — Specifications</option>
-          <option value="none">none</option>
-        `;
+  // Edges: team parent + supervisor (agent->manager)
+  let edgesHtml = '';
+  for (const t of teams) {
+    if (t.parent) {
+      const parent = teams.find(x => x.id === t.parent);
+      if (parent) {
+        const a = layout[t.parent], b = layout[t.id];
+        if (a && b) {
+          const x1 = a.x + TEAM_W/2, y1 = a.y + TEAM_H;
+          const x2 = b.x + TEAM_W/2, y2 = b.y;
+          const my = (y1+y2)/2;
+          edgesHtml += `<path class="org-team-edge" d="M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}" />`;
+        }
       }
+    }
+  }
+  // Supervisor edges between agents
+  const agentPos = {};
+  for (const team of teams) {
+    const tl = layout[team.id];
+    if (!tl) continue;
+    const members = team.members || [];
+    members.forEach((m, i) => {
+      agentPos[m] = { x: tl.x + 12, y: tl.y + 56 + i*32, w: TEAM_W - 24, h: 26 };
+    });
+  }
+  for (const [agentKey, agent] of Object.entries(agents)) {
+    if (agent.manager && agentPos[agentKey] && agentPos[agent.manager]) {
+      const a = agentPos[agent.manager];
+      const b = agentPos[agentKey];
+      const x1 = a.x + a.w, y1 = a.y + a.h/2;
+      const x2 = b.x,      y2 = b.y + b.h/2;
+      const mx = (x1+x2)/2;
+      edgesHtml += `<path class="org-supervisor-edge" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" />`;
+    }
+  }
+
+  // Team boxes + agent chips
+  let nodesHtml = '';
+  for (const team of teams) {
+    const tl = layout[team.id];
+    if (!tl) continue;
+    const isSelected = STATE.selectedOrgTeamId === team.id;
+    nodesHtml += `
+      <g class="org-team-group" data-team-id="${team.id}" transform="translate(${tl.x},${tl.y})">
+        <rect class="org-team-box ${isSelected?'selected':''}" rx="8" width="${TEAM_W}" height="${TEAM_H}" />
+        <text class="org-team-label" x="14" y="22">${safeHTML(team.name)}</text>
+        <text class="org-team-sub"   x="14" y="38">${(team.members||[]).length} member${(team.members||[]).length===1?'':'s'}${team.parent?` · ↳ ${safeHTML(team.parent)}`:''}</text>
+        ${(team.members||[]).map((m, i) => {
+          const a = agents[m];
+          if (!a) return '';
+          const ax = 12, ay = 56 + i*32, aw = TEAM_W - 24, ah = 26;
+          const roleClass = `role-${a.structuralRole || 'worker'}`;
+          const isAgentSelected = STATE.selectedOrgAgentKey === m;
+          const persona = STRUCTURAL_PERSONAS[a.structuralRole] || STRUCTURAL_PERSONAS.worker;
+          return `
+            <g class="org-agent-node" data-agent-key="${m}" data-team-id="${team.id}" transform="translate(${ax},${ay})">
+              <rect class="org-agent-rect ${roleClass} ${isAgentSelected?'selected':''}" width="${aw}" height="${ah}" rx="4" />
+              <text class="org-agent-name" x="8" y="12">${safeHTML(a.roleName)}</text>
+              <text class="org-agent-role-tag" x="8" y="22">${persona.icon} · ${m}${a.manager?` · ↑ ${a.manager}`:''}</text>
+            </g>`;
+        }).join('')}
+      </g>`;
+  }
+
+  svg.innerHTML = edgesHtml + nodesHtml;
+}
+
+function bindOrgInteractions(container) {
+  const svg = document.getElementById('org-canvas');
+  if (!svg) return;
+
+  let dragging = null;        // { type:'team'|'agent', id, startX, startY, origX, origY }
+  let pointerOriginX = 0, pointerOriginY = 0;
+
+  function clientToSVG(clientX, clientY) {
+    const pt = svg.createSVGPoint();
+    pt.x = clientX; pt.y = clientY;
+    return pt.matrixTransform(svg.getScreenCTM().inverse());
+  }
+
+  svg.addEventListener('mousedown', (e) => {
+    const teamGroup = e.target.closest('.org-team-group');
+    const agentNode = e.target.closest('.org-agent-node');
+    if (agentNode) {
+      const agentKey = agentNode.dataset.agentKey;
+      const teamId   = agentNode.dataset.teamId;
+      STATE.selectedOrgAgentKey = agentKey;
+      STATE.selectedOrgTeamId = null;
+      renderOrgInspector();
+      const pt = clientToSVG(e.clientX, e.clientY);
+      const transform = agentNode.transform.baseVal[0].matrix;
+      dragging = { type:'agent', id: agentKey, origTeamId: teamId, startX: pt.x, startY: pt.y, origX: transform.e, origY: transform.f, el: agentNode };
+      e.stopPropagation(); return;
+    }
+    if (teamGroup) {
+      const id = teamGroup.dataset.teamId;
+      STATE.selectedOrgTeamId = id;
+      STATE.selectedOrgAgentKey = null;
+      renderOrgInspector();
+      const pt = clientToSVG(e.clientX, e.clientY);
+      const layout = STATE.config.org.layout[id];
+      dragging = { type:'team', id, startX: pt.x, startY: pt.y, origX: layout.x, origY: layout.y, el: teamGroup };
+      return;
+    }
+    STATE.selectedOrgTeamId = null;
+    STATE.selectedOrgAgentKey = null;
+    drawOrgCanvas();
+    renderOrgInspector();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    const pt = clientToSVG(e.clientX, e.clientY);
+    const dx = pt.x - dragging.startX;
+    const dy = pt.y - dragging.startY;
+    if (dragging.type === 'team') {
+      const layout = STATE.config.org.layout[dragging.id];
+      layout.x = dragging.origX + dx;
+      layout.y = dragging.origY + dy;
+      drawOrgCanvas();
+    } else if (dragging.type === 'agent') {
+      const nx = dragging.origX + dx;
+      const ny = dragging.origY + dy;
+      dragging.el.setAttribute('transform', `translate(${nx},${ny})`);
+    }
+  });
+
+  window.addEventListener('mouseup', async (e) => {
+    if (!dragging) return;
+    if (dragging.type === 'agent') {
+      // Reassign? Check whether mouse is over another team box
+      const pt = clientToSVG(e.clientX, e.clientY);
+      const teams = STATE.config.org.teams;
+      let targetTeamId = null;
+      for (const t of teams) {
+        const l = STATE.config.org.layout[t.id];
+        if (!l) continue;
+        if (pt.x >= l.x && pt.x <= l.x + 280 && pt.y >= l.y && pt.y <= l.y + 240) {
+          targetTeamId = t.id; break;
+        }
+      }
+      if (targetTeamId && targetTeamId !== dragging.origTeamId) {
+        const fromTeam = teams.find(t => t.id === dragging.origTeamId);
+        const toTeam   = teams.find(t => t.id === targetTeamId);
+        if (fromTeam && toTeam) {
+          fromTeam.members = (fromTeam.members||[]).filter(m => m !== dragging.id);
+          toTeam.members   = (toTeam.members||[]).concat(dragging.id);
+          await persistConfig();
+        }
+      }
+      drawOrgCanvas();
+    }
+    dragging = null;
+  });
+
+  document.getElementById('org-add-team').addEventListener('click', async () => {
+    const name = prompt('Team display name?'); if (!name) return;
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    if (STATE.config.org.teams.find(t => t.id === id)) return alert('Team id already exists');
+    STATE.config.org.teams.push({ id, name, parent: null, members: [] });
+    await persistConfig();
+    renderOrg(document.getElementById('content'));
+  });
+  document.getElementById('org-add-agent').addEventListener('click', async () => {
+    const key = prompt('Unique agent key (lowercase, no spaces)?'); if (!key) return;
+    if (STATE.config.agents[key]) return alert('Agent key exists');
+    const roleName = prompt('Role name?'); if (!roleName) return;
+    STATE.config.agents[key] = {
+      roleName, model: 'normal', customModel: '', reasoning: 'medium',
+      heartbeat: 40, harness: 'claude-code', structuralRole: 'worker',
+      manager: null, tools: ['FileSystem'],
     };
-    tktRepo.addEventListener('change', updateSelectors);
-    updateSelectors();
-  }
+    // Add to first team or create one
+    if (!STATE.config.org.teams.length) STATE.config.org.teams.push({ id:'default', name:'Default Team', parent:null, members:[] });
+    STATE.config.org.teams[0].members.push(key);
+    await persistConfig();
+    renderOrg(document.getElementById('content'));
+  });
+  document.getElementById('org-fit').addEventListener('click', () => {
+    // Re-tile layout
+    STATE.config.org.layout = {};
+    drawOrgCanvas();
+  });
+  document.getElementById('org-save').addEventListener('click', async () => {
+    await persistConfig();
+    alert('Org layout saved');
+  });
 
-  const ticketForm = container.querySelector('#zaf-ticket-form');
-  if (ticketForm) {
-    ticketForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const title = document.getElementById('tkt-title').value;
-      const description = document.getElementById('tkt-description').value;
-      const phase = document.getElementById('tkt-phase').value;
-      const workstream = document.getElementById('tkt-workstream').value;
-      const priority = document.getElementById('tkt-priority').value;
-      const role = document.getElementById('tkt-role').value;
-      const repo = document.getElementById('tkt-repo').value;
+  renderOrgInspector();
+}
 
-      try {
-        const res = await fetch('/api/ticket/create', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title, description, phase, workstream, priority, role, repo })
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        alert(`🟢 Successfully created ticket: ${data.ticketId}`);
-        await loadData();
-        navigateTo('board');
-      } catch (err) {
-        alert(`❌ Failed creating ticket: ${err.message}`);
-      }
+function renderOrgInspector() {
+  const el = document.getElementById('org-inspector');
+  if (!el) return;
+  if (STATE.selectedOrgTeamId) {
+    const t = STATE.config.org.teams.find(x => x.id === STATE.selectedOrgTeamId);
+    if (!t) { el.innerHTML = '<div style="color:var(--text-muted);font-size:11px">Selection cleared.</div>'; return; }
+    const teams = STATE.config.org.teams;
+    el.innerHTML = `
+      <div class="meta-field"><label>Team ID</label><input value="${safeHTML(t.id)}" disabled /></div>
+      <div class="meta-field"><label>Display name</label><input id="team-name" value="${safeHTML(t.name)}" /></div>
+      <div class="meta-field"><label>Parent team</label>
+        <select id="team-parent">
+          <option value="">None (root)</option>
+          ${teams.filter(x => x.id !== t.id).map(x => `<option value="${x.id}" ${t.parent===x.id?'selected':''}>${x.name}</option>`).join('')}
+        </select>
+      </div>
+      <div style="font-size:10px;color:var(--text-muted);margin-top:4px">Members (${(t.members||[]).length}): ${(t.members||[]).join(', ') || '<em>none</em>'}</div>
+      <div style="display:flex; gap:6px; margin-top:6px;">
+        <button class="zaf-btn" id="team-save">Save</button>
+        <button class="zaf-btn danger" id="team-delete">Delete</button>
+      </div>`;
+    document.getElementById('team-save').addEventListener('click', async () => {
+      t.name = document.getElementById('team-name').value;
+      t.parent = document.getElementById('team-parent').value || null;
+      await persistConfig();
+      drawOrgCanvas();
     });
-  }
-
-  // --- AGENT EDITOR HANDLERS ---
-  const agentSelector = container.querySelector('#agent-selector');
-  if (agentSelector) {
-    agentSelector.addEventListener('change', () => {
-      STATE.selectedAgentKey = agentSelector.value;
-      renderControl(container);
+    document.getElementById('team-delete').addEventListener('click', async () => {
+      if (!confirm('Delete team ' + t.name + '? Members are orphaned (kept in agents map).')) return;
+      STATE.config.org.teams = STATE.config.org.teams.filter(x => x.id !== t.id);
+      STATE.config.org.teams.forEach(x => { if (x.parent === t.id) x.parent = null; });
+      delete STATE.config.org.layout[t.id];
+      STATE.selectedOrgTeamId = null;
+      await persistConfig();
+      renderOrg(document.getElementById('content'));
     });
-  }
+  } else if (STATE.selectedOrgAgentKey) {
+    const k = STATE.selectedOrgAgentKey;
+    const a = STATE.config.agents[k];
+    if (!a) { el.innerHTML = ''; return; }
+    const teams = STATE.config.org.teams;
+    const keys = Object.keys(STATE.config.agents);
+    el.innerHTML = `
+      <div style="font-size:10px;color:var(--text-muted)">Agent <strong style="color:var(--text-primary)">${k}</strong></div>
+      <div class="meta-field"><label>Role name</label><input id="ag-name" value="${safeHTML(a.roleName)}" /></div>
+      <div class="meta-field"><label>Structural role</label>
+        <select id="ag-struct">${Object.entries(STRUCTURAL_PERSONAS).map(([id,p])=>`<option value="${id}" ${a.structuralRole===id?'selected':''}>${p.label}</option>`).join('')}</select>
+      </div>
+      <div class="meta-field"><label>Supervisor (N+1)</label>
+        <select id="ag-mgr">
+          <option value="">None</option>
+          ${keys.filter(x => x !== k).map(x => `<option value="${x}" ${a.manager===x?'selected':''}>${STATE.config.agents[x].roleName} (${x})</option>`).join('')}
+        </select>
+      </div>
+      <div class="meta-field"><label>Team membership</label>
+        <select id="ag-team">
+          ${teams.map(t => `<option value="${t.id}" ${(t.members||[]).includes(k)?'selected':''}>${t.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="zaf-persona-preview" id="ag-persona"></div>
+      <div style="display:flex;gap:6px;margin-top:6px;">
+        <button class="zaf-btn" id="ag-save">Save</button>
+        <button class="zaf-btn danger" id="ag-delete">Delete</button>
+      </div>`;
+    const upd = () => {
+      const id = document.getElementById('ag-struct').value;
+      const p = STRUCTURAL_PERSONAS[id];
+      document.getElementById('ag-persona').textContent =
+`PERSONA — ${p.label}
 
-  const agentModelSelect = container.querySelector('#agent-model');
-  if (agentModelSelect) {
-    const checkCustomModelVisibility = () => {
-      const containerDiv = container.querySelector('#custom-model-container');
-      if (containerDiv) {
-        containerDiv.style.display = agentModelSelect.value === 'custom' ? 'block' : 'none';
-      }
+${p.persona}
+
+BOUNDS:
+${p.bounds}`;
     };
-    agentModelSelect.addEventListener('change', checkCustomModelVisibility);
-    checkCustomModelVisibility();
-  }
+    document.getElementById('ag-struct').addEventListener('change', upd);
+    upd();
 
-  const heartbeatSlider = container.querySelector('#agent-heartbeat');
-  if (heartbeatSlider) {
-    heartbeatSlider.addEventListener('input', () => {
-      const displayVal = container.querySelector('#heartbeat-val');
-      if (displayVal) displayVal.textContent = heartbeatSlider.value + ' seconds';
+    document.getElementById('ag-save').addEventListener('click', async () => {
+      a.roleName = document.getElementById('ag-name').value;
+      a.structuralRole = document.getElementById('ag-struct').value;
+      a.manager = document.getElementById('ag-mgr').value || null;
+      const targetTeam = document.getElementById('ag-team').value;
+      for (const t of teams) {
+        t.members = (t.members||[]).filter(m => m !== k);
+      }
+      const tt = teams.find(x => x.id === targetTeam);
+      if (tt) tt.members.push(k);
+      await persistConfig();
+      drawOrgCanvas();
     });
-  }
-
-  const agentForm = container.querySelector('#zaf-agent-form');
-  if (agentForm) {
-    agentForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const selectKey = agentSelector.value;
-      const name = document.getElementById('agent-name').value;
-      const model = document.getElementById('agent-model').value;
-      const customModel = document.getElementById('agent-custom-model').value;
-      const reasoning = document.getElementById('agent-reasoning').value;
-      const harness = document.getElementById('agent-harness').value;
-      const structRole = document.getElementById('agent-struct-role').value;
-      const manager = document.getElementById('agent-manager').value || null;
-      const heartbeat = parseInt(heartbeatSlider.value, 10);
-      
-      const tools = [];
-      container.querySelectorAll('.agent-tool-cb:checked').forEach(cb => {
-        tools.push(cb.value);
-      });
-
-      STATE.config.agents[selectKey].roleName = name;
-      STATE.config.agents[selectKey].model = model;
-      STATE.config.agents[selectKey].customModel = customModel;
-      STATE.config.agents[selectKey].reasoning = reasoning;
-      STATE.config.agents[selectKey].harness = harness;
-      STATE.config.agents[selectKey].structuralRole = structRole;
-      STATE.config.agents[selectKey].manager = manager;
-      STATE.config.agents[selectKey].heartbeat = heartbeat;
-      STATE.config.agents[selectKey].tools = tools;
-
-      try {
-        const res = await fetch('/api/config/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(STATE.config)
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        alert(`🟢 Custom agent configurations successfully persisted!`);
-        renderControl(container);
-      } catch (err) {
-        alert(`❌ Failed persisting configs: ${err.message}`);
-      }
+    document.getElementById('ag-delete').addEventListener('click', async () => {
+      if (!confirm('Delete agent ' + k + '? This removes it from agents and all teams.')) return;
+      delete STATE.config.agents[k];
+      for (const t of teams) t.members = (t.members||[]).filter(m => m !== k);
+      STATE.selectedOrgAgentKey = null;
+      await persistConfig();
+      renderOrg(document.getElementById('content'));
     });
+  } else {
+    el.innerHTML = '<div style="color:var(--text-muted);font-size:11px">Select a team or agent to edit. Drag agents between teams to reassign.</div>';
   }
+}
 
-  // --- DRAWERS TOGGLES HANDLERS ---
-  const toggleBtnAgent = container.querySelector('#btn-toggle-new-agent');
-  if (toggleBtnAgent) {
-    toggleBtnAgent.addEventListener('click', () => {
-      container.querySelector('#new-agent-drawer')?.classList.toggle('hidden');
-    });
-  }
-  container.querySelector('#close-new-agent')?.addEventListener('click', () => {
-    container.querySelector('#new-agent-drawer')?.classList.add('hidden');
-  });
+// =========================================================================
+// TAURI BRIDGE
+// =========================================================================
 
-  const toggleBtnTeam = container.querySelector('#btn-toggle-new-team');
-  if (toggleBtnTeam) {
-    toggleBtnTeam.addEventListener('click', () => {
-      container.querySelector('#new-team-drawer')?.classList.toggle('hidden');
-    });
-  }
-  container.querySelector('#close-new-team')?.addEventListener('click', () => {
-    container.querySelector('#new-team-drawer')?.classList.add('hidden');
-  });
-
-  const toggleBtnTool = container.querySelector('#btn-toggle-new-tool');
-  if (toggleBtnTool) {
-    toggleBtnTool.addEventListener('click', () => {
-      container.querySelector('#new-tool-drawer')?.classList.toggle('hidden');
-    });
-  }
-  container.querySelector('#close-new-tool')?.addEventListener('click', () => {
-    container.querySelector('#new-tool-drawer')?.classList.add('hidden');
-  });
-
-  // --- NEW AGENT CREATION HANDLER ---
-  const createAgentForm = container.querySelector('#zaf-create-agent-form');
-  if (createAgentForm) {
-    createAgentForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const key = document.getElementById('new-agent-key').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
-      const name = document.getElementById('new-agent-name').value;
-      const model = document.getElementById('new-agent-model').value;
-      const harness = document.getElementById('new-agent-harness').value;
-
-      if (!key) {
-        alert('❌ Error: Key must contain only lowercase letters, digits, and hyphens!');
-        return;
-      }
-      if (STATE.config.agents[key]) {
-        alert('❌ Error: An agent with this key already exists!');
-        return;
-      }
-
-      // Add default personality mappings
-      STATE.config.agents[key] = {
-        roleName: name,
-        model: model,
-        customModel: '',
-        reasoning: 'high',
-        heartbeat: 40,
-        harness: harness,
-        structuralRole: 'worker',
-        manager: null,
-        tools: ['FileSystem']
-      };
-
-      try {
-        const res = await fetch('/api/config/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(STATE.config)
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        alert(`🟢 Successfully created and registered new agent: ${name}`);
-        STATE.selectedAgentKey = key;
-        renderControl(container);
-      } catch (err) {
-        alert(`❌ Failed creating agent: ${err.message}`);
-      }
-    });
-  }
-
-  // --- NEW TEAM CREATION HANDLER ---
-  const createTeamForm = container.querySelector('#zaf-create-team-form');
-  if (createTeamForm) {
-    createTeamForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const id = document.getElementById('new-team-id').value.toLowerCase().replace(/[^a-z0-9-]/g, '');
-      const name = document.getElementById('new-team-name').value;
-      const parent = document.getElementById('new-team-parent').value || null;
-
-      if (!id) {
-        alert('❌ Error: Team ID must contain only alphanumeric characters and hyphens!');
-        return;
-      }
-      if (STATE.config.org.teams.find(t => t.id === id)) {
-        alert('❌ Error: A team with this ID already exists!');
-        return;
-      }
-
-      const members = [];
-      container.querySelectorAll('.team-member-cb:checked').forEach(cb => {
-        members.push(cb.value);
-      });
-
-      STATE.config.org.teams.push({ id, name, parent, members });
-
-      try {
-        const res = await fetch('/api/config/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(STATE.config)
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        alert(`🟢 Successfully created team "${name}" inside organization chart!`);
-        renderControl(container);
-      } catch (err) {
-        alert(`❌ Failed creating team: ${err.message}`);
-      }
-    });
-  }
-
-  // --- NEW TOOL REGISTRATION HANDLER ---
-  const registerToolForm = container.querySelector('#zaf-register-tool-form');
-  if (registerToolForm) {
-    registerToolForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const id = document.getElementById('new-tool-id').value.replace(/[^a-zA-Z0-9]/g, '');
-      const name = document.getElementById('new-tool-name').value;
-      const description = document.getElementById('new-tool-desc').value;
-
-      if (!id) {
-        alert('❌ Error: Tool ID must be purely alphanumeric (no spaces)!');
-        return;
-      }
-      if (!STATE.config.toolsRegistry) {
-        STATE.config.toolsRegistry = [];
-      }
-      if (STATE.config.toolsRegistry.find(t => t.id === id)) {
-        alert('❌ Error: A tool with this ID already exists in the registry!');
-        return;
-      }
-
-      STATE.config.toolsRegistry.push({ id, name, description });
-
-      try {
-        const res = await fetch('/api/config/save', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(STATE.config)
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        alert(`🟢 Dynamic tool "${name}" successfully enrolled into registry!`);
-        renderControl(container);
-      } catch (err) {
-        alert(`❌ Failed enrolling tool: ${err.message}`);
-      }
+function registerTauriListeners() {
+  if (typeof window !== 'undefined' && window.__TAURI__) {
+    window.__TAURI__.event?.listen?.('agent-log', (event) => {
+      // Bridge legacy Tauri stream into a synthetic process if needed
+      // (the SSE stream is the primary path; Tauri emits a duplicate).
+      console.log('[Tauri event]', event.payload);
     });
   }
 }
