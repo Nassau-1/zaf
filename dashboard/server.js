@@ -1712,6 +1712,21 @@ ${payload.description || 'Task context and description.'}
       const now = new Date().toISOString();
       // Default precedence (TKT-ZAF-0049): pack-specified value > operator defaults > hardcoded fallback.
       const d = conf.marketplaceDefaults || {};
+      // TKT-ZAF-0045: auto-create stub entries in conf.structuralRoles for any role id referenced
+      // by an imported agent that isn't built-in and isn't already a custom role. Stubs use the
+      // role id as the label so the operator sees them and can fill in persona/bounds afterward.
+      const BUILTIN_ROLE_IDS = new Set(['thinker','reviewer','worker']);
+      conf.structuralRoles = conf.structuralRoles || {};
+      for (const a of agents) {
+        const r = a.structuralRole;
+        if (r && !BUILTIN_ROLE_IDS.has(r) && !conf.structuralRoles[r]) {
+          conf.structuralRoles[r] = {
+            icon: '?', label: r,
+            persona: `(Imported placeholder — fill in via Agent Builder → Manage roles.)`,
+            bounds: '',
+          };
+        }
+      }
       let imported = 0;
       for (const a of agents) {
         const roleKey = (a.roleKey || a.roleName || 'imported').toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 32);

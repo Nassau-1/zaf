@@ -33,23 +33,58 @@ const WS_COLORS = {
   'WS-CRM':'#fb923c','WS-INTELLIGENCE':'#a78bfa','WS-REPOS':'#94a3b8','WS-ASSISTANT':'#2dd4bf',
   'WS-INFRA':'#fbbf24','WS-DASHBOARD':'#38bdf8','WS-DOCS':'#f0abfc','WS-CLI':'#86efac','none':'#64748b',
 };
-const STRUCTURAL_PERSONAS = {
+const STRUCTURAL_PERSONAS_BUILTIN = {
   thinker: {
     icon: 'PLAN', label: 'Thinker (Planner)',
     persona: 'You are a planning specialist. Decompose objectives, write step-by-step plans, identify risks, never write code unless a subordinate worker is unavailable. Optimise for clarity, sequencing, and dependency mapping.',
     bounds: 'Read-only on workspace files. May propose, never directly write code. Must annotate decisions with rationale.',
+    builtin: true,
   },
   reviewer: {
     icon: 'AUDIT', label: 'Reviewer (Auditor)',
     persona: 'You are a code & quality auditor. Read changes, identify defects, security issues, performance regressions, and policy violations. Refuse to write production code; instead, recommend.',
     bounds: 'Read-only on workspace. May write into review logs and audit artefacts only.',
+    builtin: true,
   },
   worker: {
     icon: 'BUILD', label: 'Worker (Compiler)',
     persona: 'You are the standard executor. Take a scoped ticket, implement the change, run tests, commit work. Be terse, follow the plan, do not refactor beyond scope.',
     bounds: 'Read/write on workspace files within the assigned ticket scope. May run build/test commands. May not change CI or merge.',
+    builtin: true,
   },
 };
+
+// TKT-ZAF-0045: built-ins + operator-defined custom roles (config.structuralRoles).
+// Built-ins are not deletable (only hideable via config.structuralRolesHidden) so marketplace
+// imports that reference them never break.
+function getStructuralPersonas() {
+  const custom = (STATE.config && STATE.config.structuralRoles) || {};
+  const hidden = new Set((STATE.config && STATE.config.structuralRolesHidden) || []);
+  const out = {};
+  for (const [id, p] of Object.entries(STRUCTURAL_PERSONAS_BUILTIN)) {
+    if (!hidden.has(id)) out[id] = p;
+  }
+  for (const [id, p] of Object.entries(custom)) {
+    out[id] = { ...p, builtin: false };
+  }
+  return out;
+}
+
+// Back-compat shim for the few places that still reference the old name. New code should call
+// getStructuralPersonas(). This object is a snapshot at call time, NOT live.
+const STRUCTURAL_PERSONAS = new Proxy({}, {
+  get(_, k) {
+    const all = getStructuralPersonas();
+    if (k === 'entries' || k === 'keys' || k === 'values' || k === Symbol.iterator) return undefined;
+    return all[k];
+  },
+  ownKeys() { return Object.keys(getStructuralPersonas()); },
+  getOwnPropertyDescriptor(_, k) {
+    const all = getStructuralPersonas();
+    if (k in all) return { configurable: true, enumerable: true, value: all[k] };
+    return undefined;
+  },
+});
 
 // =========================================================================
 // STATE
@@ -3578,9 +3613,12 @@ function renderControlAgentEditor() {
           </div>
 
           <div class="zaf-field"><label>Structural Role (alters generated persona & bounds)</label>
-            <select id="agent-struct-role">
-              ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
-            </select>
+            <div style="display:flex;gap:8px;align-items:center">
+              <select id="agent-struct-role" style="flex:1">
+                ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}${p.builtin===false?' ·custom':''}</option>`).join('')}
+              </select>
+              <button type="button" class="zaf-btn secondary" id="agent-manage-roles-btn" title="Add, edit or remove custom structural roles">Manage roles…</button>
+            </div>
           </div>
           <div class="zaf-persona-preview" id="persona-preview"></div>
 
@@ -3671,6 +3709,9 @@ function renderControlAgentEditor() {
 function wireAgentEditor(container) {
   const selector = container.querySelector('#agent-selector');
   selector?.addEventListener('change', () => { STATE.selectedAgentKey = selector.value; renderControl(container); });
+
+  // Manage structural roles (TKT-ZAF-0045)
+  container.querySelector('#agent-manage-roles-btn')?.addEventListener('click', () => openStructuralRolesModal(container));
 
   // Duplicate as new profile (TKT-ZAF-0041)
   container.querySelector('#agent-dupe-btn')?.addEventListener('click', async () => {
@@ -5103,6 +5144,117 @@ function bindOrgInteractions(container) {
   }, { passive: false });
 
   renderOrgInspector();
+}
+
+// Manage Structural Roles modal (TKT-ZAF-0045) — add, edit and delete custom structural roles.
+// Built-ins are non-deletable but can be hidden from the picker via config.structuralRolesHidden.
+function openStructuralRolesModal(hostContainer) {
+  document.getElementById('zaf-roles-modal')?.remove();
+  const personas = getStructuralPersonas();
+  const customRoles = (STATE.config && STATE.config.structuralRoles) || {};
+
+  const modal = document.createElement('div');
+  modal.id = 'zaf-roles-modal';
+  modal.className = 'zaf-launch-modal';
+  modal.innerHTML = `
+    <div class="zaf-launch-backdrop"></div>
+    <div class="zaf-launch-panel" style="max-width:680px;width:90vw">
+      <div class="zaf-launch-header">
+        <div>
+          <div class="zaf-launch-title">Manage structural roles</div>
+          <div class="zaf-launch-sub">Built-ins (thinker / reviewer / worker) cannot be deleted; toggle the visibility checkbox to hide them. Custom roles can be edited or removed.</div>
+        </div>
+        <button class="zaf-launch-close" id="roles-close">✕</button>
+      </div>
+      <div class="zaf-launch-body" style="display:flex;flex-direction:column;gap:12px">
+        <div id="roles-list" style="display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow:auto;border:1px solid var(--border-subtle);border-radius:4px;padding:8px"></div>
+        <fieldset style="border:1px solid var(--border-subtle);border-radius:4px;padding:10px 14px;display:flex;flex-direction:column;gap:8px">
+          <legend style="font-size:11px;color:var(--text-muted);padding:0 6px">Add custom role</legend>
+          <div style="display:grid;grid-template-columns:140px 1fr 1fr;gap:8px">
+            <input id="role-add-id" placeholder="id (alphanum)" />
+            <input id="role-add-icon" placeholder="icon / short tag" />
+            <input id="role-add-label" placeholder="display label" />
+          </div>
+          <textarea id="role-add-persona" rows="3" placeholder="Persona instruction (what the agent IS in this role)"></textarea>
+          <textarea id="role-add-bounds" rows="2" placeholder="Operational bounds (what it may / may not do)"></textarea>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="zaf-btn" id="role-add-btn">Add role</button>
+            <span id="roles-status" style="font-size:11px;color:var(--text-muted)"></span>
+          </div>
+        </fieldset>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector('#roles-close').addEventListener('click', close);
+  modal.querySelector('.zaf-launch-backdrop').addEventListener('click', close);
+
+  const listEl = modal.querySelector('#roles-list');
+  const statusEl = modal.querySelector('#roles-status');
+
+  const renderRows = () => {
+    const fresh = getStructuralPersonas();
+    const hiddenIds = new Set((STATE.config.structuralRolesHidden) || []);
+    const rows = [];
+    for (const id of Object.keys(STRUCTURAL_PERSONAS_BUILTIN)) {
+      const p = STRUCTURAL_PERSONAS_BUILTIN[id];
+      const hidden = hiddenIds.has(id);
+      rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid var(--border-subtle);border-radius:4px">
+        <div><strong>${safeHTML(p.icon)} ${safeHTML(p.label)}</strong> <span style="font-size:10px;color:var(--text-muted)">built-in</span>
+          <div style="font-size:10px;color:var(--text-muted);max-width:380px">${safeHTML(p.persona).slice(0,120)}…</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px">
+          <input type="checkbox" class="role-vis" data-id="${id}" ${hidden?'':'checked'} /><span>Visible</span>
+        </label>
+      </div>`);
+    }
+    for (const [id, p] of Object.entries(STATE.config.structuralRoles || {})) {
+      rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid var(--border-subtle);border-radius:4px">
+        <div><strong>${safeHTML(p.icon || '·')} ${safeHTML(p.label || id)}</strong> <span style="font-size:10px;color:var(--text-muted)">custom · ${id}</span>
+          <div style="font-size:10px;color:var(--text-muted);max-width:380px">${safeHTML(p.persona || '').slice(0,120)}…</div>
+        </div>
+        <button class="zaf-btn secondary role-del" data-id="${safeHTML(id)}">Delete</button>
+      </div>`);
+    }
+    listEl.innerHTML = rows.join('') || '<div style="color:var(--text-muted);font-size:11px;text-align:center;padding:18px">No roles defined.</div>';
+    listEl.querySelectorAll('.role-vis').forEach(cb => cb.addEventListener('change', async () => {
+      const id = cb.dataset.id;
+      STATE.config.structuralRolesHidden = STATE.config.structuralRolesHidden || [];
+      const hiddenSet = new Set(STATE.config.structuralRolesHidden);
+      if (cb.checked) hiddenSet.delete(id); else hiddenSet.add(id);
+      STATE.config.structuralRolesHidden = [...hiddenSet];
+      await persistConfig();
+      renderRows();
+    }));
+    listEl.querySelectorAll('.role-del').forEach(b => b.addEventListener('click', async () => {
+      const id = b.dataset.id;
+      if (!confirm(`Delete custom role "${id}"? Agents currently using it will fall back to worker on next render.`)) return;
+      delete STATE.config.structuralRoles[id];
+      await persistConfig();
+      renderRows();
+      renderControl(hostContainer);
+    }));
+  };
+
+  modal.querySelector('#role-add-btn').addEventListener('click', async () => {
+    const id = modal.querySelector('#role-add-id').value.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '');
+    const icon = modal.querySelector('#role-add-icon').value.trim();
+    const label = modal.querySelector('#role-add-label').value.trim();
+    const persona = modal.querySelector('#role-add-persona').value.trim();
+    const bounds = modal.querySelector('#role-add-bounds').value.trim();
+    if (!id || !label || !persona) { statusEl.textContent = 'id, label, persona required'; return; }
+    if (STRUCTURAL_PERSONAS_BUILTIN[id]) { statusEl.textContent = 'id collides with built-in'; return; }
+    STATE.config.structuralRoles = STATE.config.structuralRoles || {};
+    STATE.config.structuralRoles[id] = { icon: icon || '·', label, persona, bounds };
+    await persistConfig();
+    statusEl.textContent = `✓ Added ${id}`;
+    ['role-add-id','role-add-icon','role-add-label','role-add-persona','role-add-bounds'].forEach(k => { const el = modal.querySelector('#' + k); if (el) el.value = ''; });
+    renderRows();
+    renderControl(hostContainer);
+  });
+
+  renderRows();
 }
 
 // Org Builder agent picker (TKT-ZAF-0052) — replaces blank-slot "+ Agent" with a searchable
