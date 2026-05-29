@@ -1040,9 +1040,9 @@ const ROLE_RECOMMENDATIONS = {
 // Available harness ids (kept in sync with cli/zo.js HARNESS_MAP and server CLI_HARNESS_COMMANDS)
 const HARNESS_OPTIONS = [
   { id: 'mock',        label: '⬡ Simulator (test only)', tooltip: 'Test-only harness. Produces synthetic agent output to validate the ZAF pipeline without consuming AI credits. Not a real AI.' },
-  { id: 'claude-code', label: 'Claude Code CLI (interactive — requires terminal)' },
-  { id: 'codex',       label: 'OpenAI Codex CLI (interactive — requires terminal)' },
-  { id: 'gemini-cli',  label: 'Gemini CLI (interactive — requires terminal)' },
+  { id: 'claude-code', label: 'Claude Code CLI' },
+  { id: 'codex',       label: 'OpenAI Codex CLI' },
+  { id: 'gemini-cli',  label: 'Gemini CLI' },
 ];
 
 function displayHarness(h) { return h === 'mock' ? 'Simulator' : h; }
