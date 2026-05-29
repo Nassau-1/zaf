@@ -4694,6 +4694,19 @@ function renderControlCliHub() {
       </form>
     </div>`;
 
+  const backupHtml = `
+    <div class="zaf-control-card" style="margin-top:24px">
+      <h2>Backup &amp; Restore</h2>
+      <p style="color:var(--text-secondary);font-size:12px;margin-bottom:12px">
+        Snapshots cover <code>dashboard/config.json</code>, the audit log, agent run captures, and every repo's <code>WIP/</code> ticket tree. Retention: 7 daily · 5 weekly (Mondays) · 12 monthly (1st of month). Storage: <code>02_Runtime/zaf-backups/</code>. See <a href="/docs/BACKUPS.md" target="_blank">BACKUPS.md</a>.
+      </p>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <button class="zaf-btn" id="backup-now-btn">Backup now</button>
+        <button class="zaf-btn secondary" id="backup-restore-btn" title="Restore the latest daily snapshot into the live tree">Restore latest</button>
+        <span id="backup-status" style="font-size:11px;color:var(--text-muted)"></span>
+      </div>
+    </div>`;
+
   const addCustomHtml = `
     <div class="zaf-control-card" style="margin-top:24px">
       <h2>Add Custom Harness</h2>
@@ -4718,11 +4731,34 @@ function renderControlCliHub() {
       </div>
       <div class="zaf-cli-grid">${cardsHtml}</div>
       ${githubHtml}
+      ${backupHtml}
       ${addCustomHtml}
     </div>`;
 }
 
 function wireCliHub(container) {
+  // Backup / Restore (TKT-ZAF-0057)
+  container.querySelector('#backup-now-btn')?.addEventListener('click', async () => {
+    const statusEl = container.querySelector('#backup-status');
+    statusEl.textContent = 'Backing up…';
+    try {
+      const r = await fetch('/api/backup/run', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      statusEl.textContent = `✓ ${d.manifest.files} files, tiers: ${d.manifest.tiers.join(', ')}`;
+    } catch (e) { statusEl.textContent = '✗ ' + e.message; }
+  });
+  container.querySelector('#backup-restore-btn')?.addEventListener('click', async () => {
+    if (!confirm('Restore the latest daily snapshot? This overwrites dashboard config, audit log, and every repo\'s WIP/. Are you sure?')) return;
+    const statusEl = container.querySelector('#backup-status');
+    statusEl.textContent = 'Restoring…';
+    try {
+      const r = await fetch('/api/backup/restore-latest', { method: 'POST' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+      statusEl.textContent = `✓ Restored ${d.report.restored.length} entries from ${d.report.snapshot}`;
+    } catch (e) { statusEl.textContent = '✗ ' + e.message; }
+  });
   const conf = STATE.config || {};
   const customHarnesses = conf.customHarnesses || [];
   const allIds = [...CLI_HUB_HARNESSES.map(h => h.id), ...customHarnesses.map(h => h.id)];

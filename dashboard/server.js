@@ -821,6 +821,27 @@ function parseHelpOutput(raw) {
   return { flags: flags.slice(0, 40), models: models.slice(0, 40) };
 }
 
+// ─── Scheduled backup tick (TKT-ZAF-0057) ────────────────────────────────────
+// Runs once an hour; backup.js's classify() decides whether a snapshot is actually due
+// (daily always, weekly on Monday, monthly on the 1st). Last-run timestamp is tracked
+// in memory; on restart the next eligible hour will trigger again.
+let lastBackupStamp = '';
+function backupTick() {
+  try {
+    const { runBackup } = require('./backup.js');
+    const today = new Date().toISOString().slice(0, 10);
+    if (lastBackupStamp === today) return;
+    const m = runBackup();
+    lastBackupStamp = today;
+    auditAppend({ kind: 'backup.scheduled', files: m.files, tiers: m.tiers, errors: m.errors.length });
+  } catch (e) {
+    console.error('[BACKUP] scheduled run failed:', e.message);
+  }
+}
+setInterval(backupTick, 60 * 60 * 1000);
+// Run one shortly after startup so a fresh deploy gets a snapshot.
+setTimeout(backupTick, 30 * 1000);
+
 // ─── Heartbeat sweeper (TKT-ZAF-0015) ────────────────────────────────────────
 
 function getRetryScheduleMs() {
@@ -1634,6 +1655,26 @@ ${payload.description || 'Task context and description.'}
       auditAppend({ kind: 'github.config-saved', name: name || '', email: email || '', authMethod: authMethod || '' });
       send(res, 200, { status: 'ok' });
     } catch (e) { send(res, 400, { error: e.message }); }
+    return;
+  }
+
+  // ── Backup engine (TKT-ZAF-0057) ─────────────────────────────────────────
+  if (pathname === '/api/backup/run' && req.method === 'POST') {
+    try {
+      const { runBackup } = require('./backup.js');
+      const manifest = runBackup();
+      auditAppend({ kind: 'backup.run', files: manifest.files, tiers: manifest.tiers, errors: manifest.errors.length });
+      send(res, 200, { status: 'ok', manifest });
+    } catch (e) { send(res, 500, { error: e.message }); }
+    return;
+  }
+  if (pathname === '/api/backup/restore-latest' && req.method === 'POST') {
+    try {
+      const { restoreLatest } = require('./backup.js');
+      const report = restoreLatest();
+      auditAppend({ kind: 'backup.restore', snapshot: report.snapshot, count: report.restored.length });
+      send(res, 200, { status: 'ok', report });
+    } catch (e) { send(res, 500, { error: e.message }); }
     return;
   }
 
