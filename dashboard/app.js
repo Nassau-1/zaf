@@ -3594,14 +3594,17 @@ function renderControlAgentEditor() {
               </div>
 
               <div class="zaf-field"><label>Authorized CLIs</label>
+                <div style="font-size:10px;color:var(--text-muted);margin:-2px 0 6px;line-height:1.4">
+                  The set of CLI harnesses the operator can pick from when launching this agent. The Default Harness above is the pre-selected option; any other CLI checked here is also permitted at launch time. Uncheck to forbid that CLI for this agent.
+                </div>
                 <div id="agent-harness-multi" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg-input);border:1px solid var(--border-medium);padding:10px 12px;border-radius:var(--radius-sm);">
                   ${getAllHarnessOptions().map(h => {
                     const isActive = (Array.isArray(a.harnesses) && a.harnesses.length)
                       ? a.harnesses.includes(h.id)
                       : (a.harness === h.id);
-                    return `<label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary);cursor:pointer;">
-                      <input type="checkbox" class="agent-harness-cb" value="${h.id}" ${isActive?'checked':''} style="accent-color:var(--indigo-400);" />
-                      <span>${h.label}</span>
+                    return `<label style="display:flex;align-items:center;gap:8px;font-size:11px;line-height:1;color:var(--text-secondary);cursor:pointer;min-height:22px;">
+                      <input type="checkbox" class="agent-harness-cb" value="${h.id}" ${isActive?'checked':''} style="accent-color:var(--indigo-400);margin:0;flex:0 0 auto;" />
+                      <span style="line-height:1.3">${h.label}</span>
                     </label>`;
                   }).join('')}
                 </div>
