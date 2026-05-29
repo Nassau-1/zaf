@@ -1125,8 +1125,19 @@
 .zaf-cli-hub-header { margin-bottom: 20px; }
 .zaf-cli-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: 1fr;
   gap: 16px;
+}
+@media (min-width: 1600px) {
+  .zaf-cli-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.zaf-cli-card .cli-pty-host-wrap { width: 100%; }
+.zaf-cli-card .cli-pty-host-wrap > div {
+  min-height: 360px;
+  height: clamp(360px, 45vh, 560px) !important;
+  width: 100%;
+  resize: vertical;
+  overflow: auto;
 }
 .zaf-cli-card {
   background: var(--surface-2);
