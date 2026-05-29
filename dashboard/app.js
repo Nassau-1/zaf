@@ -3611,19 +3611,25 @@ function renderControlAgentEditor() {
               </div>
 
               <div class="zaf-field"><label>Authorized Tools</label>
+                <div style="font-size:10px;color:var(--text-muted);margin:-2px 0 6px;line-height:1.4">
+                  Tools the agent is permitted to invoke at runtime. Add new tools via the "Register Tool" form on the right; each registered tool persists in <code>config.json → toolsRegistry</code> and is consumed at agent seed-prompt composition.
+                </div>
                 <div style="display:flex;flex-direction:column;gap:6px;background:var(--bg-input);border:1px solid var(--border-medium);padding:12px 14px;border-radius:var(--radius-sm);">
                   ${tools.map(t => `
-                    <label style="display:flex;align-items:flex-start;gap:8px;font-size:12px;color:var(--text-secondary);cursor:pointer;">
-                      <input type="checkbox" class="agent-tool-cb" value="${t.id}" ${(a.tools||[]).includes(t.id)?'checked':''} style="accent-color:var(--indigo-400);margin-top:2px;" />
-                      <div><strong style="color:var(--text-primary);">${t.name}</strong>
-                      <div style="font-size:10px;color:var(--text-muted);">${safeHTML(t.description)}</div></div>
-                    </label>`).join('') || '<span style="color:var(--text-muted);font-size:11px">No tools registered yet.</span>'}
+                    <label style="display:grid;grid-template-columns:18px 1fr;gap:10px;align-items:start;font-size:12px;color:var(--text-secondary);cursor:pointer;">
+                      <input type="checkbox" class="agent-tool-cb" value="${t.id}" ${(a.tools||[]).includes(t.id)?'checked':''} style="accent-color:var(--indigo-400);margin:2px 0 0;justify-self:center;" />
+                      <div><strong style="color:var(--text-primary);display:block;line-height:1.3">${t.name}</strong>
+                        <div style="font-size:10px;color:var(--text-muted);margin-top:2px;line-height:1.4">${safeHTML(t.description)}</div></div>
+                    </label>`).join('') || '<span style="color:var(--text-muted);font-size:11px">No tools registered yet — use the "Register Tool" form (right column) to add one.</span>'}
                 </div>
               </div>
 
               <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
                 <button type="button" class="zaf-btn secondary" id="cli-probe-btn">⚙ Probe capabilities</button>
                 <span id="cli-probe-status" style="font-size:11px;color:var(--text-muted)"></span>
+              </div>
+              <div style="font-size:10px;color:var(--text-muted);margin-top:4px;line-height:1.4">
+                Probe runs <code>${'<harness> --help'}</code> in a subprocess and extracts the model list and supported flags from the output. Use it after installing or updating a CLI to refresh what ZAF knows about it. Result is cached per harness for the session.
               </div>
               <div class="zaf-discovery-result" id="cli-probe-result" style="display:none"></div>
             </div>
