@@ -1014,6 +1014,32 @@ const HARNESS_MODEL_IDS = {
   ],
 };
 
+// Heartbeat tick scale (TKT-ZAF-0046) — piecewise quasi-logarithmic. The slider index walks this
+// array so the operator gets fine resolution at the low end (seconds) and broad reach at the
+// high end (days). The stored heartbeat value remains in seconds — unchanged data model.
+const HEARTBEAT_TICKS = [
+  5, 10, 15, 20, 30, 45, 60, 90, 120,                          // seconds tier (1s..2min)
+  180, 300, 600, 900, 1200, 1800, 2400, 3000, 3600,            // minute tier (3..60min)
+  5400, 7200, 10800, 14400, 21600, 28800, 43200, 64800, 86400, // hour tier (1.5..24h)
+  172800, 259200, 345600, 432000, 518400, 604800,              // day tier (2..7d)
+];
+
+function formatHeartbeat(seconds) {
+  if (seconds <= 120) return `${seconds}s`;
+  if (seconds <= 3600) return `${Math.round(seconds / 60)} min`;
+  if (seconds <= 86400) return `${(seconds / 3600).toFixed(seconds % 3600 === 0 ? 0 : 1)} h`;
+  return `${Math.round(seconds / 86400)} d`;
+}
+
+function heartbeatSecondsToTickIndex(seconds) {
+  let bestIdx = 0, bestDiff = Infinity;
+  for (let i = 0; i < HEARTBEAT_TICKS.length; i++) {
+    const d = Math.abs(HEARTBEAT_TICKS[i] - seconds);
+    if (d < bestDiff) { bestDiff = d; bestIdx = i; }
+  }
+  return bestIdx;
+}
+
 // Reasoning-effort capability per harness (TKT-ZAF-0044).
 // `values: null` means the harness does NOT expose a configurable reasoning level — the control
 // is hidden in Agent Builder. claude-code is the only harness ZAF currently wires the value
@@ -3562,9 +3588,9 @@ function renderControlAgentEditor() {
           <details class="agent-advanced-section">
             <summary>Advanced</summary>
             <div class="agent-advanced-inner">
-              <div class="zaf-field"><label><span>Heartbeat Interval</span><span class="zaf-heartbeat-val" id="heartbeat-val">${a.heartbeat || 40} seconds</span></label>
-                <div class="zaf-heartbeat-row"><input type="range" id="agent-heartbeat" min="5" max="300" step="5" value="${a.heartbeat || 40}" /></div>
-                <div class="zaf-heartbeat-hint">Internal plumbing — how often the subshell emits a heartbeat tick.</div>
+              <div class="zaf-field"><label><span>Heartbeat Interval</span><span class="zaf-heartbeat-val" id="heartbeat-val">${formatHeartbeat(a.heartbeat || 40)}</span></label>
+                <div class="zaf-heartbeat-row"><input type="range" id="agent-heartbeat" min="0" max="${HEARTBEAT_TICKS.length - 1}" step="1" value="${heartbeatSecondsToTickIndex(a.heartbeat || 40)}" /></div>
+                <div class="zaf-heartbeat-hint">Internal plumbing — how often the subshell emits a heartbeat tick. Scale: 5s → 7 days.</div>
               </div>
 
               <div class="zaf-field"><label>Authorized CLIs</label>
@@ -3633,7 +3659,10 @@ function wireAgentEditor(container) {
 
   const slider = container.querySelector('#agent-heartbeat');
   const sliderVal = container.querySelector('#heartbeat-val');
-  slider?.addEventListener('input', () => { sliderVal.textContent = `${slider.value} seconds`; });
+  slider?.addEventListener('input', () => {
+    const idx = +slider.value;
+    sliderVal.textContent = formatHeartbeat(HEARTBEAT_TICKS[idx] ?? 40);
+  });
 
   const personaPreview = container.querySelector('#persona-preview');
   const updatePersona = () => {
@@ -3779,7 +3808,7 @@ ${p.bounds}`;
     if (!c.harnesses.includes(c.harness)) c.harness = c.harnesses[0];
     c.structuralRole = container.querySelector('#agent-struct-role').value;
     c.manager        = container.querySelector('#agent-manager').value || null;
-    c.heartbeat      = parseInt(slider?.value || '40', 10);
+    c.heartbeat      = HEARTBEAT_TICKS[+slider?.value] ?? 40;
     c.tools          = Array.from(container.querySelectorAll('.agent-tool-cb:checked')).map(cb => cb.value);
     await persistConfig();
     alert('Saved ' + c.roleName);
