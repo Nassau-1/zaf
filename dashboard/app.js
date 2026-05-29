@@ -3726,7 +3726,46 @@ function renderControlMarketplace() {
     </div>
     <div class="mkt-update-diff" id="mkt-update-diff-${idx}" style="display:none;margin:4px 0 12px;"></div>`).join('');
 
+  // Import defaults (TKT-ZAF-0049) — values applied to imported agents whose pack manifest is silent.
+  const md = STATE.config.marketplaceDefaults || {};
+  const harnessOpts = getAllHarnessOptions();
+  const defaultsCard = `
+    <div class="zaf-control-card" style="max-width:900px;margin-bottom:20px;">
+      <h2 style="margin-bottom:6px">Import Defaults</h2>
+      <p style="color:var(--text-secondary);font-size:12px;margin-bottom:14px">Applied to imported agents when the pack manifest does not specify a value. Pack-specified values still win.</p>
+      <form id="mkt-defaults-form" style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:12px;">
+        <div class="zaf-field"><label>Default CLI / Harness</label>
+          <select id="mkt-def-harness">
+            <option value="">— none —</option>
+            ${harnessOpts.map(h => `<option value="${h.id}" ${md.harness===h.id?'selected':''}>${h.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="zaf-field"><label>Default Model ID</label>
+          <input id="mkt-def-model" type="text" value="${safeHTML(md.modelId || '')}" placeholder="e.g. claude-sonnet-4-6" />
+        </div>
+        <div class="zaf-field"><label>Default Reasoning</label>
+          <select id="mkt-def-reasoning">
+            ${['','low','medium','high'].map(v => `<option value="${v}" ${md.reasoning===v?'selected':''}>${v||'— none —'}</option>`).join('')}
+          </select>
+        </div>
+        <div class="zaf-field"><label>Default Structural Role</label>
+          <select id="mkt-def-struct">
+            <option value="">— none —</option>
+            ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${md.structuralRole===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
+          </select>
+        </div>
+        <div class="zaf-field"><label>Default Heartbeat (s)</label>
+          <input id="mkt-def-heartbeat" type="number" min="5" max="300" step="5" value="${md.heartbeat || ''}" placeholder="40" />
+        </div>
+        <div style="grid-column:1/4;display:flex;gap:10px;align-items:center;">
+          <button type="submit" class="zaf-btn">Save Defaults</button>
+          <span id="mkt-def-status" style="font-size:11px;color:var(--text-muted)"></span>
+        </div>
+      </form>
+    </div>`;
+
   return `
+    ${defaultsCard}
     <div class="zaf-control-card" style="max-width:900px">
       <h2>Agent Marketplace</h2>
       <p style="color:var(--text-secondary);margin-bottom:20px;font-size:13px">Import agent packs from a git URL. Supports Format A (.md frontmatter) and Format B (agents.json).</p>
@@ -3753,6 +3792,36 @@ function renderControlMarketplace() {
 }
 
 function wireMarketplace(container) {
+  // Marketplace import defaults form (TKT-ZAF-0049)
+  const defForm = container.querySelector('#mkt-defaults-form');
+  if (defForm) {
+    defForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const statusEl = container.querySelector('#mkt-def-status');
+      const payload = {
+        harness:        container.querySelector('#mkt-def-harness').value,
+        modelId:        container.querySelector('#mkt-def-model').value.trim(),
+        reasoning:      container.querySelector('#mkt-def-reasoning').value,
+        structuralRole: container.querySelector('#mkt-def-struct').value,
+        heartbeat:      container.querySelector('#mkt-def-heartbeat').value,
+      };
+      statusEl.textContent = 'Saving…';
+      try {
+        const r = await fetch('/api/config/marketplace-defaults', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || 'HTTP ' + r.status);
+        STATE.config = STATE.config || {};
+        STATE.config.marketplaceDefaults = d.defaults || payload;
+        statusEl.textContent = '✓ Saved — applied to future imports';
+      } catch (err) {
+        statusEl.textContent = '✗ ' + err.message;
+      }
+    });
+  }
+
   const previewBtn = container.querySelector('#mkt-preview-btn');
   if (!previewBtn) return;
   const urlInput  = container.querySelector('#mkt-url');

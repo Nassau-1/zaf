@@ -1591,6 +1591,25 @@ ${payload.description || 'Task context and description.'}
     return;
   }
 
+  // ── Marketplace import defaults (TKT-ZAF-0049) ───────────────────────────
+  if (pathname === '/api/config/marketplace-defaults' && req.method === 'POST') {
+    try {
+      const payload = await readJsonBody(req);
+      const { harness, modelId, reasoning, structuralRole, heartbeat } = payload || {};
+      const conf = readConfig() || {};
+      conf.marketplaceDefaults = conf.marketplaceDefaults || {};
+      if (typeof harness        === 'string') conf.marketplaceDefaults.harness        = harness;
+      if (typeof modelId        === 'string') conf.marketplaceDefaults.modelId        = modelId;
+      if (typeof reasoning      === 'string') conf.marketplaceDefaults.reasoning      = reasoning;
+      if (typeof structuralRole === 'string') conf.marketplaceDefaults.structuralRole = structuralRole;
+      if (Number.isFinite(+heartbeat))        conf.marketplaceDefaults.heartbeat      = +heartbeat;
+      writeConfig(conf);
+      auditAppend({ kind: 'marketplace.defaults-saved', defaults: conf.marketplaceDefaults });
+      send(res, 200, { status: 'ok', defaults: conf.marketplaceDefaults });
+    } catch (e) { send(res, 400, { error: e.message }); }
+    return;
+  }
+
   // ── CLI Hub: register custom harness (TKT-ZAF-0019) ──────────────────────
   if (pathname === '/api/harness/custom' && req.method === 'POST') {
     try {
@@ -1645,17 +1664,19 @@ ${payload.description || 'Task context and description.'}
       conf.agents = conf.agents || {};
       conf.importedPacks = conf.importedPacks || [];
       const now = new Date().toISOString();
+      // Default precedence (TKT-ZAF-0049): pack-specified value > operator defaults > hardcoded fallback.
+      const d = conf.marketplaceDefaults || {};
       let imported = 0;
       for (const a of agents) {
         const roleKey = (a.roleKey || a.roleName || 'imported').toLowerCase().replace(/[^a-z0-9]/g, '-').slice(0, 32);
         if (conf.agents[roleKey]) continue; // skip duplicates silently
         conf.agents[roleKey] = {
           roleName: a.roleName || roleKey,
-          modelId: a.modelId || 'claude-sonnet-4-6',
-          reasoning: a.reasoning || 'medium',
-          heartbeat: a.heartbeat || 40,
-          harness: a.harness || 'mock',
-          structuralRole: a.structuralRole || 'worker',
+          modelId: a.modelId || d.modelId || 'claude-sonnet-4-6',
+          reasoning: a.reasoning || d.reasoning || 'medium',
+          heartbeat: a.heartbeat || d.heartbeat || 40,
+          harness: a.harness || d.harness || 'mock',
+          structuralRole: a.structuralRole || d.structuralRole || 'worker',
           personality: a.personality || '',
           team: a.team || null,
           manager: null,
