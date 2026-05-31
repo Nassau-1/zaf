@@ -62,17 +62,16 @@ const fleetProcessIds = new Set();             // processIds spawned via fleet d
 const REPO_CONTEXT_CACHE = new Map(); // repoRoot -> { ts, contextBlock, graph }
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'target', 'coverage', '.turbo', 'out', '.cache']);
 
-function walkDir(dirPath, maxDepth, depth = 0) {
-  if (depth > maxDepth) return [];
-  let results = [];
+function walkDir(dirPath, maxDepth, depth = 0, results = []) {
+  if (depth > maxDepth) return results;
   let entries;
-  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return []; }
+  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return results; }
   for (const e of entries) {
     if (e.name.startsWith('.') && e.name !== '.zaf-skills') continue;
     if (IGNORE_DIRS.has(e.name)) continue;
     const full = path.join(dirPath, e.name);
     if (e.isDirectory()) {
-      results = results.concat(walkDir(full, maxDepth, depth + 1));
+      walkDir(full, maxDepth, depth + 1, results);
     } else if (e.isFile()) {
       results.push(full);
     }
@@ -115,11 +114,7 @@ function extractImports(filePath, content) {
     for (const re of patterns) {
       for (const m of content.matchAll(re)) {
         const rel = m[1];
-        const exts = ['', '.js', '.ts', '.jsx', '.tsx', '/index.js', '/index.ts'];
-        for (const x of exts) {
-          const resolved = path.resolve(dir, rel + x);
-          imports.push(resolved);
-        }
+        imports.push(path.resolve(dir, rel));
       }
     }
   }
@@ -169,9 +164,9 @@ function generateRepoContext(repoRoot) {
   const graphEdges = [];
   for (const [rel, d] of Object.entries(fileData)) {
     for (const imp of d.imports) {
-      const exts = ['', '.js', '.ts', '.jsx', '.tsx'];
+      const exts = ['', '.js', '.ts', '.jsx', '.tsx', '/index.js', '/index.ts'];
       for (const x of exts) {
-        const candidate = imp + x;
+        const candidate = path.normalize(imp + x);
         if (fileSet.has(candidate)) {
           const toRel = path.relative(repoRoot, candidate).replace(/\\/g, '/');
           if (toRel !== rel) graphEdges.push({ from: rel, to: toRel });

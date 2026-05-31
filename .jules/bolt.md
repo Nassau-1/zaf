@@ -1,0 +1,3 @@
+## 2025-01-20 - Unnecessary String Permutations in extractImports
+**Learning:** In `dashboard/server.js`, `extractImports` was proactively generating 7 different extension strings for every import found, pushing all permutations into an array, resulting in O(N^2) permutations checked later. Also, `walkDir` used `concat()` at every directory level, causing massive memory reallocation overhead on deep folder trees.
+**Action:** Modify `extractImports` to push only the base resolved path, and dynamically loop over the extensions when needed. Update recursive functions like `walkDir` to pass a single mutable array (`results`) down the stack instead of recreating arrays via `.concat()`.
