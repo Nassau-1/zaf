@@ -2026,8 +2026,16 @@ ${payload.description || 'Task context and description.'}
   }
 
   // ── Static files ───────────────────────────────────────────────────────────
-  let filePath = path.join(STATIC_DIR, pathname === '/' ? 'index.html' : pathname);
-  if (!filePath.startsWith(STATIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  // SECURITY FIX: Decode URI component and properly resolve/validate absolute path to prevent path traversal bypasses
+  let decodedPathname;
+  try {
+    decodedPathname = decodeURIComponent(pathname);
+  } catch (e) {
+    res.writeHead(400); res.end('Bad Request'); return;
+  }
+  let filePath = path.resolve(path.join(STATIC_DIR, decodedPathname === '/' ? 'index.html' : decodedPathname));
+  const safeStaticDir = path.resolve(STATIC_DIR) + path.sep;
+  if (!filePath.startsWith(safeStaticDir) && filePath !== path.resolve(STATIC_DIR, 'index.html')) { res.writeHead(403); res.end('Forbidden'); return; }
   const contentType = MIME[path.extname(filePath)] || 'application/octet-stream';
   fs.readFile(filePath, (err, data) => {
     if (err) {
