@@ -983,8 +983,20 @@ html, body {
   font-size: 18px;
   line-height: 1;
   transition: background var(--t-fast), color var(--t-fast);
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  padding: 0;
 }
 .detail-close:hover { background: var(--bg-card); color: var(--text-primary); }
+
+.btn:focus-visible,
+.console-btn:focus-visible,
+.detail-close:focus-visible,
+.nav-item:focus-visible {
+  outline: 2px solid var(--indigo-500);
+  outline-offset: 2px;
+}
 
 .detail-title {
   font-size: 15px;
