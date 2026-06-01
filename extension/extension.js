@@ -823,7 +823,7 @@ function extractFileRefsFromTicket(content) {
   return refs;
 }
 
-function updateDecorations(editor, context) {
+async function updateDecorations(editor, context) {
   if (!editor) return;
   ensureDecorationType(context);
 
@@ -834,14 +834,16 @@ function updateDecorations(editor, context) {
   const activeDir = path.join(root, 'WIP', 'tickets', 'ACTIVE');
   if (!fs.existsSync(activeDir)) { editor.setDecorations(decorationType, []); return; }
 
-  const decorations = [];
-
   try {
-    const ticketFiles = fs.readdirSync(activeDir).filter(f => f.endsWith('.md'));
-    for (const tf of ticketFiles) {
+    const files = await fs.promises.readdir(activeDir);
+    const mdFiles = files.filter(f => f.endsWith('.md'));
+
+    const decorationsArrays = await Promise.all(mdFiles.map(async (tf) => {
       const ticketPath = path.join(activeDir, tf);
       let content;
-      try { content = fs.readFileSync(ticketPath, 'utf8'); } catch { continue; }
+      try {
+        content = await fs.promises.readFile(ticketPath, 'utf8');
+      } catch { return []; }
 
       const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
       let ticketId = path.basename(tf, '.md');
@@ -858,6 +860,7 @@ function updateDecorations(editor, context) {
       }
 
       const refs = extractFileRefsFromTicket(content);
+      const decs = [];
       for (const ref of refs) {
         // Match by file path suffix
         const normalised = ref.filePath.replace(/\\/g, '/');
@@ -873,14 +876,17 @@ function updateDecorations(editor, context) {
         hover.appendMarkdown(`- **ID**: \`${ticketId}\`\n`);
         hover.appendMarkdown(`- **Title**: ${title}\n`);
         hover.appendMarkdown(`\n[▶ Open Detail](command:zaf.openDetail?${encodeURIComponent(JSON.stringify(ticketId))})`);
-        decorations.push({ range, hoverMessage: hover });
+        decs.push({ range, hoverMessage: hover });
       }
-    }
+      return decs;
+    }));
+
+    const decorations = decorationsArrays.flat();
+    editor.setDecorations(decorationType, decorations);
+
   } catch (err) {
     console.error('[ZAF] Gutter update error:', err);
   }
-
-  editor.setDecorations(decorationType, decorations);
 }
 
 // ─── activate ─────────────────────────────────────────────────────────────────

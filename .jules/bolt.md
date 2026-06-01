@@ -1,0 +1,3 @@
+## 2024-06-01 - Asynchronous File Reads in VS Code Extension
+**Learning:** Synchronous file reads (`fs.readFileSync`) within event loop handlers (like the VS Code extension host thread) block the main UI thread. This becomes a severe bottleneck when parsing directories of files (like reading multiple active tickets) causing the editor decorations to feel laggy and block extension APIs.
+**Action:** Always prefer `fs.promises` combined with `await Promise.all(items.map(async ...))` for looping file I/O within node extensions to offload the disk access, free the event loop, and ensure smooth UI updates.
