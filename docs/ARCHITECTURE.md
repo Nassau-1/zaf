@@ -57,7 +57,7 @@ The multi-console terminal panel is powered by xterm.js PTY mirrors. Each spawne
 
 ## CLI
 
-`cli/zaf.js` is the canonical CLI entrypoint. `cli/zo.js` exists as a thin backwards-compatibility wrapper.
+`cli/zaf.js` is the canonical CLI entrypoint.
 
 Subcommands:
 
@@ -154,7 +154,6 @@ zaf/
 ├── package.json
 ├── cli/
 │   ├── zaf.js                 Canonical CLI entrypoint
-│   ├── zo.js                  Deprecated wrapper that delegates to zaf.js
 │   └── test-harness.js        Automated harness and telemetry tests
 ├── dashboard/
 │   ├── server.js              HTTP + SSE control server (port 4242)

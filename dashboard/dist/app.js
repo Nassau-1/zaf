@@ -692,7 +692,7 @@ function openDetailPanel(id) {
   setTimeout(() => panel.classList.remove('slide-in'), 300);
 }
 
-// Available harness ids (kept in sync with cli/zo.js HARNESS_MAP and server CLI_HARNESS_COMMANDS)
+// Available harness ids (kept in sync with cli/zaf.js HARNESS_MAP and server CLI_HARNESS_COMMANDS)
 const HARNESS_OPTIONS = [
   { id: 'mock',        label: 'Mock (simulated telemetry in dashboard)' },
   { id: 'claude-code', label: 'Claude Code CLI (interactive — requires terminal)' },

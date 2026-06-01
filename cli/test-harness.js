@@ -23,10 +23,10 @@ console.log('\n======================================================');
 console.log('🧪 TEST 1: Taxonomy Profile Parsing');
 console.log('======================================================');
 
-const zoScriptPath = path.join(REPO_ROOT, 'cli', 'zo.js');
-const zoCode = fs.readFileSync(zoScriptPath, 'utf8');
+const zafScriptPath = path.join(REPO_ROOT, 'cli', 'zaf.js');
+const zafCode = fs.readFileSync(zafScriptPath, 'utf8');
 
-// We can load zo.js getRoleProfile using dynamic evaluation or simulate it
+// We can load zaf.js getRoleProfile using dynamic evaluation or simulate it
 function testGetRoleProfile(role) {
   if (!fs.existsSync(TAXONOMY_PATH)) {
     throw new Error('docs/agent-taxonomy.md is missing');

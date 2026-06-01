@@ -1098,7 +1098,7 @@ const ROLE_RECOMMENDATIONS = {
   reviewer: { modelId: 'claude-sonnet-4-6',          reasoning: 'high',   label: 'Sonnet 4.6 + high reasoning' },
 };
 
-// Available harness ids (kept in sync with cli/zo.js HARNESS_MAP and server CLI_HARNESS_COMMANDS)
+// Available harness ids (kept in sync with cli/zaf.js HARNESS_MAP and server CLI_HARNESS_COMMANDS)
 const HARNESS_OPTIONS = [
   { id: 'mock',        label: '⬡ Simulator (test only)', tooltip: 'Test-only harness. Produces synthetic agent output to validate the ZAF pipeline without consuming AI credits. Not a real AI.' },
   { id: 'claude-code', label: 'Claude Code CLI' },

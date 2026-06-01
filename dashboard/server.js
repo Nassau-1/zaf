@@ -471,7 +471,7 @@ Begin by stating (in one sentence) your understanding of this ticket and your fi
 
 // ─── PTY-based subprocess spawn (TKT-ZAF-0013/0014/0015) ────────────────────
 
-const zoScript = path.join(__dirname, '..', 'cli', 'zo.js');
+const zafScript = path.join(__dirname, '..', 'cli', 'zaf.js');
 
 function spawnAgent(opts) {
   const { ticketId, role, harness, modelId, model, reasoning, heartbeat, promptAddendum, repoId, isFleet } = opts;
@@ -512,7 +512,7 @@ function spawnAgent(opts) {
   if (harness === 'mock' || harness === 'zo') {
     // Use cmd.exe to wrap node so PATH resolution works reliably on Windows
     ptyCmd = 'cmd.exe';
-    const nodeArgs = [zoScript, 'run', role, '--ticket', ticketId, '--harness', harness];
+    const nodeArgs = [zafScript, 'run', role, '--ticket', ticketId, '--harness', harness];
     if (effectiveModelId) nodeArgs.push('--model', effectiveModelId);
     if (reasoning)        nodeArgs.push('--reasoning', reasoning);
     if (heartbeat)        nodeArgs.push('--heartbeat', heartbeat);
@@ -784,7 +784,7 @@ const MOCK_HELP_TEXT = [
 
 const CLI_HARNESS_COMMANDS = {
   'claude-code': { cmd: 'npx', args: ['--yes', '@anthropic-ai/claude-code', '--help'] },
-  'zo':          { cmd: 'node', args: [path.join(__dirname, '..', 'cli', 'zo.js')] },
+  'zo':          { cmd: 'node', args: [path.join(__dirname, '..', 'cli', 'zaf.js')] },
   'gemini-cli':  { cmd: 'npx', args: ['--yes', '@google/gemini-cli', '--help'] },
   'codex':       { cmd: 'npx', args: ['--yes', '@openai/codex', '--help'] },
   'mock':        { cmd: 'node', args: ['-e', `process.stdout.write(${JSON.stringify(MOCK_HELP_TEXT)})`] },

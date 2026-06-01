@@ -6,11 +6,11 @@ This specification outlines the technical design, command interfaces, stdin/stdo
 
 ## 🛠 Command Line Interface Specifications
 
-The ZAF CLI is a lightweight Node.js executable script located at `cli/zo.js`. It interacts directly with the local Markdown-based filesystem database and manages sovereign shell subprocesses.
+The ZAF CLI is a lightweight Node.js executable script located at `cli/zaf.js`. It interacts directly with the local Markdown-based filesystem database and manages sovereign shell subprocesses.
 
 ### Core Command Set:
 
-#### 1. `zo run <agent-role> --ticket <TKT-ID> [--harness <cli>]`
+#### 1. `zaf run <agent-role> --ticket <TKT-ID> [--harness <cli>]`
 Spawns the targeted sovereign CLI tool inside a controlled subshell context.
 *   **Parameters**:
     *   `<agent-role>`: Targeted role profile (e.g. `engineering`, `sre`, `security`) from `docs/agent-taxonomy.md`.
