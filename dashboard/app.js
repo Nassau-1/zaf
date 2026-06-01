@@ -4736,7 +4736,7 @@ function renderControlCliHub() {
     </div>`;
 }
 
-function wireCliHub(container) {
+function wireBackupHandlers(container) {
   // Backup / Restore (TKT-ZAF-0057)
   container.querySelector('#backup-now-btn')?.addEventListener('click', async () => {
     const statusEl = container.querySelector('#backup-status');
@@ -4759,6 +4759,9 @@ function wireCliHub(container) {
       statusEl.textContent = `✓ Restored ${d.report.restored.length} entries from ${d.report.snapshot}`;
     } catch (e) { statusEl.textContent = '✗ ' + e.message; }
   });
+}
+
+function checkHarnessStatuses(container) {
   const conf = STATE.config || {};
   const customHarnesses = conf.customHarnesses || [];
   const allIds = [...CLI_HUB_HARNESSES.map(h => h.id), ...customHarnesses.map(h => h.id)];
@@ -4784,7 +4787,9 @@ function wireCliHub(container) {
         });
     }
   }
+}
 
+function wireCliInstallHandlers(container) {
   // Install buttons
   container.querySelectorAll('[id^="cli-install-btn-"]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -4816,7 +4821,9 @@ function wireCliHub(container) {
       }
     });
   });
+}
 
+function wireCliConnectHandlers(container) {
   // Connect buttons
   container.querySelectorAll('[id^="cli-connect-btn-"]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -4847,7 +4854,9 @@ function wireCliHub(container) {
       }
     });
   });
+}
 
+function wireGithubFormHandlers(container) {
   // GitHub form
   container.querySelector('#zaf-github-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -4887,7 +4896,9 @@ function wireCliHub(container) {
     if (sshRow) sshRow.style.display = e.target.value === 'ssh' ? '' : 'none';
     if (patRow) patRow.style.display = e.target.value === 'pat' ? '' : 'none';
   });
+}
 
+function wireCustomHarnessFormHandlers(container) {
   // Custom harness form
   container.querySelector('#zaf-custom-harness-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -4914,6 +4925,15 @@ function wireCliHub(container) {
       statusEl.textContent = '✗ Failed: ' + err.message;
     }
   });
+}
+
+function wireCliHub(container) {
+  wireBackupHandlers(container);
+  checkHarnessStatuses(container);
+  wireCliInstallHandlers(container);
+  wireCliConnectHandlers(container);
+  wireGithubFormHandlers(container);
+  wireCustomHarnessFormHandlers(container);
 }
 
 // =========================================================================
