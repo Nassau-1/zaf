@@ -38,3 +38,4 @@ wip/
 
 # Tauri build artefacts
 src-tauri/target/
+bench_test/
