@@ -197,3 +197,51 @@ try {
     if (fs.existsSync(tempTestScriptPath)) fs.unlinkSync(tempTestScriptPath);
   }, 1500);
 }
+
+// Test 4: Verify Date Classification (Daily, Weekly, Monthly)
+console.log('\n======================================================');
+console.log('🧪 TEST 4: Date Classification for Backup Tiers');
+console.log('======================================================');
+
+const { classify } = require('../dashboard/backup.js');
+
+try {
+  // Test Case 1: Regular day (Tuesday, 2nd) -> Should be ['daily']
+  // Date constructor months are 0-indexed, so 2024-10-02 (Wed) or we can use 2024-10-01 (Tue).
+  // Let's use 2024-05-07 (Tuesday)
+  const regularDay = new Date(2024, 4, 7); // May 7, 2024 is Tuesday
+  const regularTiers = classify(regularDay);
+  if (regularTiers.length !== 1 || !regularTiers.includes('daily')) {
+    throw new Error(`Expected ['daily'], got ${JSON.stringify(regularTiers)}`);
+  }
+  console.log('✅ Regular day classification correct.');
+
+  // Test Case 2: Monday (not 1st) -> Should be ['daily', 'weekly']
+  const mondayDay = new Date(2024, 4, 6); // May 6, 2024 is Monday
+  const mondayTiers = classify(mondayDay);
+  if (mondayTiers.length !== 2 || !mondayTiers.includes('daily') || !mondayTiers.includes('weekly')) {
+    throw new Error(`Expected ['daily', 'weekly'], got ${JSON.stringify(mondayTiers)}`);
+  }
+  console.log('✅ Monday classification correct.');
+
+  // Test Case 3: 1st of month (not Monday) -> Should be ['daily', 'monthly']
+  const firstOfMonth = new Date(2024, 4, 1); // May 1, 2024 is Wednesday
+  const firstOfMonthTiers = classify(firstOfMonth);
+  if (firstOfMonthTiers.length !== 2 || !firstOfMonthTiers.includes('daily') || !firstOfMonthTiers.includes('monthly')) {
+    throw new Error(`Expected ['daily', 'monthly'], got ${JSON.stringify(firstOfMonthTiers)}`);
+  }
+  console.log('✅ First of month classification correct.');
+
+  // Test Case 4: 1st of month AND Monday -> Should be ['daily', 'weekly', 'monthly']
+  const mondayAndFirst = new Date(2024, 3, 1); // April 1, 2024 is Monday
+  const mondayAndFirstTiers = classify(mondayAndFirst);
+  if (mondayAndFirstTiers.length !== 3 || !mondayAndFirstTiers.includes('daily') || !mondayAndFirstTiers.includes('weekly') || !mondayAndFirstTiers.includes('monthly')) {
+    throw new Error(`Expected ['daily', 'weekly', 'monthly'], got ${JSON.stringify(mondayAndFirstTiers)}`);
+  }
+  console.log('✅ First of month & Monday classification correct.');
+
+  console.log('🎉 TEST 4 PASSED.');
+} catch (error) {
+  console.error(`❌ TEST 4 FAILED: ${error.message}`);
+  process.exit(1);
+}
