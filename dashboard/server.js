@@ -29,6 +29,9 @@ const STATIC_DIR = __dirname;
 const PARSE_SCRIPT = path.join(__dirname, 'parse.js');
 const DATA_FILE = path.join(__dirname, 'data.json');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
+
+// Memory cache for /api/data to avoid repeated I/O
+let cachedData = null;
 const SECRETS_FILE = path.join(__dirname, '.secrets.json'); // gitignored — PAT lives here (TKT-ZAF-0058)
 const AUDIT_FILE = path.join(__dirname, 'audit-log.jsonl');
 
@@ -319,6 +322,11 @@ function startWatcher() {
   };
   watcher.on('add', trigger).on('change', trigger).on('unlink', trigger);
   watcher.on('error', err => console.error('[WATCH]', err));
+
+  // Also watch data.json to keep cache updated
+  chokidar.watch(DATA_FILE, { persistent: true, ignoreInitial: false })
+    .on('add', () => { try { cachedData = fs.readFileSync(DATA_FILE, 'utf8'); } catch {} })
+    .on('change', () => { try { cachedData = fs.readFileSync(DATA_FILE, 'utf8'); } catch {} });
 }
 
 function runParse() {
@@ -971,9 +979,15 @@ const server = http.createServer(async (req, res) => {
 
   // ── Data ───────────────────────────────────────────────────────────────────
   if (pathname === '/api/data') {
-    runParse();
-    try { send(res, 200, fs.readFileSync(DATA_FILE, 'utf8')); }
-    catch { send(res, 500, { error: 'data.json missing — parse failed' }); }
+    // Return from in-memory cache if available. runParse is already triggered by watcher on file changes.
+    if (!cachedData) {
+      try { cachedData = fs.readFileSync(DATA_FILE, 'utf8'); } catch {}
+    }
+    if (cachedData) {
+      send(res, 200, cachedData);
+    } else {
+      send(res, 500, { error: 'data.json missing — parse failed' });
+    }
     return;
   }
 
