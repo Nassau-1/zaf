@@ -16,7 +16,9 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { execSync, spawn } = require('child_process');
+const { execSync, spawn, exec } = require('child_process');
+const util = require('util');
+const execAsync = util.promisify(exec);
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
@@ -1544,7 +1546,7 @@ ${payload.description || 'Task context and description.'}
           return send(res, 400, { error: 'cloneTo already exists and is non-empty: ' + cloneTo });
         }
         try {
-          execSync(`git clone "${remoteUrl}" "${cloneTo}"`, { timeout: 120000, stdio: 'pipe' });
+          await execAsync(`git clone "${remoteUrl}" "${cloneTo}"`, { timeout: 120000 });
         } catch (e) {
           return send(res, 500, { error: 'git clone failed: ' + (e.stderr?.toString() || e.message) });
         }
