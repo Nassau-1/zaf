@@ -5293,6 +5293,70 @@ function openStructuralRolesModal(hostContainer) {
   renderRows();
 }
 
+function filterOrgAgents(agents, { q, cli, sr, src }) {
+  return agents.filter(([key, a]) => {
+    if (cli && a.harness !== cli) return false;
+    if (sr && a.structuralRole !== sr) return false;
+    if (src === 'local' && a.source) return false;
+    if (src === 'imported' && !a.source) return false;
+    if (q && !`${a.roleName || ''} ${key}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function attachOrgPickerCardListeners(modal, listEl, teamEl, teams) {
+  listEl.querySelectorAll('.mkt-agent-card').forEach(card => {
+    card.addEventListener('click', async () => {
+      const key = card.dataset.key;
+      let teamId = teamEl.value;
+      if (!teams.length) {
+        STATE.config.org.teams.push({ id:'default', name:'Default Team', parent:null, members:[] });
+        teamId = 'default';
+      }
+      const target = STATE.config.org.teams.find(t => t.id === teamId);
+      if (!target) return;
+      target.members = target.members || [];
+      if (target.members.includes(key)) { modal.remove(); return; }
+      target.members.push(key);
+      await persistConfig();
+      modal.remove();
+      renderOrg(document.getElementById('content'));
+    });
+  });
+}
+
+function attachOrgPickerListeners(modal, elements, renderList, teamEl) {
+  const { qEl, cliEl, structEl, srcEl } = elements;
+  qEl.addEventListener('input', renderList);
+  cliEl.addEventListener('change', renderList);
+  structEl.addEventListener('change', renderList);
+  srcEl.addEventListener('change', renderList);
+  teamEl.addEventListener('change', renderList);
+
+  modal.querySelector('#org-picker-close').addEventListener('click', () => modal.remove());
+  modal.querySelector('.zaf-launch-backdrop').addEventListener('click', () => modal.remove());
+  modal.querySelector('#org-picker-create').addEventListener('click', async () => {
+    const key = prompt('Unique agent key (lowercase, no spaces)?'); if (!key) return;
+    if (STATE.config.agents[key]) return alert('Agent key exists');
+    const roleName = prompt('Role name?'); if (!roleName) return;
+    STATE.config.agents[key] = {
+      roleName, model: 'normal', customModel: '', reasoning: 'medium',
+      heartbeat: 40, harness: 'claude-code', structuralRole: 'worker',
+      manager: null, tools: ['FileSystem'],
+    };
+    let teamId = teamEl.value;
+    if (!STATE.config.org.teams.length) {
+      STATE.config.org.teams.push({ id:'default', name:'Default Team', parent:null, members:[] });
+      teamId = 'default';
+    }
+    const target = STATE.config.org.teams.find(t => t.id === teamId) || STATE.config.org.teams[0];
+    target.members.push(key);
+    await persistConfig();
+    modal.remove();
+    renderOrg(document.getElementById('content'));
+  });
+}
+
 // Org Builder agent picker (TKT-ZAF-0052) — replaces blank-slot "+ Agent" with a searchable
 // modal listing every existing agent (Builder + Marketplace), filterable by structural role,
 // CLI, and source (local vs imported). Includes a "Create new" fallback for when no existing
@@ -5365,18 +5429,13 @@ function openOrgAgentPicker() {
     const cli = cliEl.value;
     const sr  = structEl.value;
     const src = srcEl.value;
-    const rows = agents.filter(([key, a]) => {
-      if (cli && a.harness !== cli) return false;
-      if (sr && a.structuralRole !== sr) return false;
-      if (src === 'local' && a.source) return false;
-      if (src === 'imported' && !a.source) return false;
-      if (q && !`${a.roleName || ''} ${key}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
+    const rows = filterOrgAgents(agents, { q, cli, sr, src });
+
     if (!rows.length) {
       listEl.innerHTML = `<div style="color:var(--text-muted);font-size:12px;padding:18px;text-align:center">No agents match.</div>`;
       return;
     }
+
     listEl.innerHTML = rows.map(([key, a]) => {
       const teamId = teamEl.value;
       const inTeam = memberships[key]?.has(teamId);
@@ -5394,53 +5453,11 @@ function openOrgAgentPicker() {
         </div>
       </div>`;
     }).join('');
-    listEl.querySelectorAll('.mkt-agent-card').forEach(card => {
-      card.addEventListener('click', async () => {
-        const key = card.dataset.key;
-        let teamId = teamEl.value;
-        if (!teams.length) {
-          STATE.config.org.teams.push({ id:'default', name:'Default Team', parent:null, members:[] });
-          teamId = 'default';
-        }
-        const target = STATE.config.org.teams.find(t => t.id === teamId);
-        if (!target) return;
-        target.members = target.members || [];
-        if (target.members.includes(key)) { modal.remove(); return; }
-        target.members.push(key);
-        await persistConfig();
-        modal.remove();
-        renderOrg(document.getElementById('content'));
-      });
-    });
+
+    attachOrgPickerCardListeners(modal, listEl, teamEl, teams);
   };
 
-  qEl.addEventListener('input', renderList);
-  cliEl.addEventListener('change', renderList);
-  structEl.addEventListener('change', renderList);
-  srcEl.addEventListener('change', renderList);
-  teamEl.addEventListener('change', renderList);
-  modal.querySelector('#org-picker-close').addEventListener('click', () => modal.remove());
-  modal.querySelector('.zaf-launch-backdrop').addEventListener('click', () => modal.remove());
-  modal.querySelector('#org-picker-create').addEventListener('click', async () => {
-    const key = prompt('Unique agent key (lowercase, no spaces)?'); if (!key) return;
-    if (STATE.config.agents[key]) return alert('Agent key exists');
-    const roleName = prompt('Role name?'); if (!roleName) return;
-    STATE.config.agents[key] = {
-      roleName, model: 'normal', customModel: '', reasoning: 'medium',
-      heartbeat: 40, harness: 'claude-code', structuralRole: 'worker',
-      manager: null, tools: ['FileSystem'],
-    };
-    let teamId = teamEl.value;
-    if (!STATE.config.org.teams.length) {
-      STATE.config.org.teams.push({ id:'default', name:'Default Team', parent:null, members:[] });
-      teamId = 'default';
-    }
-    const target = STATE.config.org.teams.find(t => t.id === teamId) || STATE.config.org.teams[0];
-    target.members.push(key);
-    await persistConfig();
-    modal.remove();
-    renderOrg(document.getElementById('content'));
-  });
+  attachOrgPickerListeners(modal, { qEl, cliEl, structEl, srcEl }, renderList, teamEl);
 
   renderList();
 }
