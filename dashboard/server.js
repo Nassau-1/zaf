@@ -16,7 +16,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { execSync, spawn } = require('child_process');
+const { execSync, execFileSync, spawn } = require('child_process');
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
@@ -323,7 +323,7 @@ function startWatcher() {
 
 function runParse() {
   try {
-    execSync(`node "${PARSE_SCRIPT}" --repos-root "${REPOS_ROOT}"`, {
+    execFileSync('node', [PARSE_SCRIPT, '--repos-root', REPOS_ROOT], {
       cwd: __dirname, timeout: 30000, stdio: 'inherit',
     });
   } catch (err) {
@@ -1544,7 +1544,7 @@ ${payload.description || 'Task context and description.'}
           return send(res, 400, { error: 'cloneTo already exists and is non-empty: ' + cloneTo });
         }
         try {
-          execSync(`git clone "${remoteUrl}" "${cloneTo}"`, { timeout: 120000, stdio: 'pipe' });
+          execFileSync('git', ['clone', remoteUrl, cloneTo], { timeout: 120000, stdio: 'pipe' });
         } catch (e) {
           return send(res, 500, { error: 'git clone failed: ' + (e.stderr?.toString() || e.message) });
         }
@@ -1579,7 +1579,7 @@ ${payload.description || 'Task context and description.'}
 
       // 1. Create directory and git init
       fs.mkdirSync(localPath, { recursive: true });
-      try { execSync('git init', { cwd: localPath, timeout: 10000, stdio: 'ignore' }); } catch {}
+      try { execFileSync('git', ['init'], { cwd: localPath, timeout: 10000, stdio: 'ignore' }); } catch {}
 
       // 2. Copy template files
       const templateRoot = path.join(__dirname, 'templates', 'new-repo');
@@ -1594,7 +1594,7 @@ ${payload.description || 'Task context and description.'}
 
       // 3. Git remote add
       if (remoteUrl) {
-        try { execSync(`git remote add origin "${remoteUrl}"`, { cwd: localPath, timeout: 5000, stdio: 'ignore' }); } catch {}
+        try { execFileSync('git', ['remote', 'add', 'origin', remoteUrl], { cwd: localPath, timeout: 5000, stdio: 'ignore' }); } catch {}
       }
 
       // 4. Update config.repos
@@ -1665,8 +1665,8 @@ ${payload.description || 'Task context and description.'}
       const payload = await readJsonBody(req);
       const { name, email, defaultRemote, authMethod, sshKeyPath, pat } = payload;
       if (!name && !email) return send(res, 400, { error: 'At least name or email required' });
-      if (name) execSync(`git config --global user.name "${name.replace(/['"]/g, '')}"`, { timeout: 5000, shell: true });
-      if (email) execSync(`git config --global user.email "${email.replace(/['"]/g, '')}"`, { timeout: 5000, shell: true });
+      if (name) execFileSync('git', ['config', '--global', 'user.name', name], { timeout: 5000 });
+      if (email) execFileSync('git', ['config', '--global', 'user.email', email], { timeout: 5000 });
       const conf = readConfig() || {};
       conf.github = conf.github || {};
       if (name)          conf.github.name          = name;
@@ -1764,7 +1764,7 @@ ${payload.description || 'Task context and description.'}
       const slug = url.replace(/[^a-z0-9]/gi, '-').slice(-40);
       const tmpDir = path.join(tmpBase, slug);
       if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
-      execSync(`git clone --depth 1 "${url}" "${tmpDir}"`, { timeout: 30000 });
+      execFileSync('git', ['clone', '--depth', '1', url, tmpDir], { timeout: 30000 });
       const scanRoot = subdir ? path.join(tmpDir, subdir) : tmpDir;
       const agents = parseAgentPack(scanRoot, url);
       send(res, 200, { agents, count: agents.length, source: url });
@@ -1880,7 +1880,7 @@ ${payload.description || 'Task context and description.'}
       fs.mkdirSync(tmpBase, { recursive: true });
       const slug = source.replace(/[^a-z0-9]/gi, '-').slice(-40);
       const tmpDir = path.join(tmpBase, slug + '-update-' + Date.now());
-      execSync(`git clone --depth 1 "${source}" "${tmpDir}"`, { timeout: 30000 });
+      execFileSync('git', ['clone', '--depth', '1', source, tmpDir], { timeout: 30000 });
       const incoming = parseAgentPack(tmpDir, source);
       const conf = readConfig() || {};
       const localAgents = Object.entries(conf.agents || {}).filter(([, a]) => a.source === source);
