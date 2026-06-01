@@ -5297,8 +5297,7 @@ function openStructuralRolesModal(hostContainer) {
 // modal listing every existing agent (Builder + Marketplace), filterable by structural role,
 // CLI, and source (local vs imported). Includes a "Create new" fallback for when no existing
 // agent fits.
-function openOrgAgentPicker() {
-  document.getElementById('zaf-org-picker')?.remove();
+function _getOrgPickerData() {
   const conf = STATE.config || {};
   const agents = Object.entries(conf.agents || {});
   const teams = (conf.org?.teams || []);
@@ -5307,10 +5306,12 @@ function openOrgAgentPicker() {
     if (!memberships[m]) memberships[m] = new Set();
     memberships[m].add(t.id);
   }
-
   const harnesses = [...new Set(agents.map(([,a]) => a.harness).filter(Boolean))];
   const structRoles = [...new Set(agents.map(([,a]) => a.structuralRole).filter(Boolean))];
+  return { agents, teams, memberships, harnesses, structRoles };
+}
 
+function _buildOrgPickerModal(harnesses, structRoles, teams) {
   const modal = document.createElement('div');
   modal.id = 'zaf-org-picker';
   modal.className = 'zaf-launch-modal';
@@ -5351,8 +5352,10 @@ function openOrgAgentPicker() {
         </div>
       </div>
     </div>`;
-  document.body.appendChild(modal);
+  return modal;
+}
 
+function _createOrgPickerRenderListFn(modal, agents, teams, memberships) {
   const listEl   = modal.querySelector('#org-picker-list');
   const qEl      = modal.querySelector('#org-picker-q');
   const cliEl    = modal.querySelector('#org-picker-cli');
@@ -5360,7 +5363,7 @@ function openOrgAgentPicker() {
   const srcEl    = modal.querySelector('#org-picker-source');
   const teamEl   = modal.querySelector('#org-picker-team');
 
-  const renderList = () => {
+  return () => {
     const q = (qEl.value || '').toLowerCase();
     const cli = cliEl.value;
     const sr  = structEl.value;
@@ -5413,12 +5416,21 @@ function openOrgAgentPicker() {
       });
     });
   };
+}
+
+function _attachOrgPickerEvents(modal, renderList, teams) {
+  const qEl      = modal.querySelector('#org-picker-q');
+  const cliEl    = modal.querySelector('#org-picker-cli');
+  const structEl = modal.querySelector('#org-picker-struct');
+  const srcEl    = modal.querySelector('#org-picker-source');
+  const teamEl   = modal.querySelector('#org-picker-team');
 
   qEl.addEventListener('input', renderList);
   cliEl.addEventListener('change', renderList);
   structEl.addEventListener('change', renderList);
   srcEl.addEventListener('change', renderList);
   teamEl.addEventListener('change', renderList);
+
   modal.querySelector('#org-picker-close').addEventListener('click', () => modal.remove());
   modal.querySelector('.zaf-launch-backdrop').addEventListener('click', () => modal.remove());
   modal.querySelector('#org-picker-create').addEventListener('click', async () => {
@@ -5441,6 +5453,17 @@ function openOrgAgentPicker() {
     modal.remove();
     renderOrg(document.getElementById('content'));
   });
+}
+
+function openOrgAgentPicker() {
+  document.getElementById('zaf-org-picker')?.remove();
+
+  const { agents, teams, memberships, harnesses, structRoles } = _getOrgPickerData();
+  const modal = _buildOrgPickerModal(harnesses, structRoles, teams);
+  document.body.appendChild(modal);
+
+  const renderList = _createOrgPickerRenderListFn(modal, agents, teams, memberships);
+  _attachOrgPickerEvents(modal, renderList, teams);
 
   renderList();
 }
