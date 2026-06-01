@@ -4606,18 +4606,8 @@ function getCliHarnessSpec(id) {
   return CLI_HUB_HARNESSES.find(h => h.id === id);
 }
 
-function renderControlCliHub() {
-  const conf = STATE.config || {};
-  const customHarnesses = conf.customHarnesses || [];
-  const agentUsage = conf.agentUsage || {};
-  const github = conf.github || {};
-
-  const allHarnesses = [
-    ...CLI_HUB_HARNESSES,
-    ...customHarnesses.map(h => ({ id: h.id, label: h.displayName, installCmd: h.installCmd || '', authCmd: h.authCmd || '', isCustom: true })),
-  ];
-
-  const cardsHtml = allHarnesses.map(h => {
+function renderCliHarnessCards(allHarnesses, agentUsage) {
+  return allHarnesses.map(h => {
     const usage = agentUsage[h.id] || {};
     const lastRun = usage.lastRun ? new Date(usage.lastRun).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Never';
     const statusInfo = STATE.cliHubStatus[h.id];
@@ -4659,8 +4649,10 @@ function renderControlCliHub() {
         </div>
       </div>`;
   }).join('');
+}
 
-  const githubHtml = `
+function renderGithubConfigHtml(github) {
+  return `
     <div class="zaf-control-card" style="margin-top:24px">
       <h2>Git Identity &amp; Remote</h2>
       <form id="zaf-github-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
@@ -4693,8 +4685,10 @@ function renderControlCliHub() {
         </div>
       </form>
     </div>`;
+}
 
-  const backupHtml = `
+function renderBackupHtml() {
+  return `
     <div class="zaf-control-card" style="margin-top:24px">
       <h2>Backup &amp; Restore</h2>
       <p style="color:var(--text-secondary);font-size:12px;margin-bottom:12px">
@@ -4706,8 +4700,10 @@ function renderControlCliHub() {
         <span id="backup-status" style="font-size:11px;color:var(--text-muted)"></span>
       </div>
     </div>`;
+}
 
-  const addCustomHtml = `
+function renderAddCustomHarnessHtml() {
+  return `
     <div class="zaf-control-card" style="margin-top:24px">
       <h2>Add Custom Harness</h2>
       <form id="zaf-custom-harness-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
@@ -4722,6 +4718,23 @@ function renderControlCliHub() {
         </div>
       </form>
     </div>`;
+}
+
+function renderControlCliHub() {
+  const conf = STATE.config || {};
+  const customHarnesses = conf.customHarnesses || [];
+  const agentUsage = conf.agentUsage || {};
+  const github = conf.github || {};
+
+  const allHarnesses = [
+    ...CLI_HUB_HARNESSES,
+    ...customHarnesses.map(h => ({ id: h.id, label: h.displayName, installCmd: h.installCmd || '', authCmd: h.authCmd || '', isCustom: true })),
+  ];
+
+  const cardsHtml = renderCliHarnessCards(allHarnesses, agentUsage);
+  const githubHtml = renderGithubConfigHtml(github);
+  const backupHtml = renderBackupHtml();
+  const addCustomHtml = renderAddCustomHarnessHtml();
 
   return `
     <div class="zaf-cli-hub fade-in">
