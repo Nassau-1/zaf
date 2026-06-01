@@ -938,6 +938,43 @@ function readJsonBody(req) {
   });
 }
 
+// ─── Cross-site request guard (CSRF / drive-by RCE defense) ──────────────────
+// The control server is an operator tool bound to loopback. Several routes spawn
+// processes, run CLIs, clone git URLs and write files (e.g. /api/pty/inline,
+// /api/run, /api/repo/create, /api/marketplace/*). Setting CORS response headers
+// only governs whether a browser may *read* a response — it does NOT stop the
+// server from *executing* a cross-site request (a `text/plain` simple-request
+// POST, or a GET via <img>, runs server-side regardless). This guard rejects any
+// request a browser marks as cross-site, or whose Origin/Host is not loopback, so
+// a malicious web page cannot drive these endpoints. Non-browser clients (curl,
+// the VSCode extension's native http) send no Sec-Fetch-Site/Origin and reach the
+// server over a loopback Host, so they are unaffected.
+
+function isLoopbackHost(hostHeader) {
+  if (!hostHeader) return false;
+  let host = String(hostHeader).trim().toLowerCase();
+  // strip port (handle [::1]:4242 and host:port)
+  if (host.startsWith('[')) host = host.slice(1, host.indexOf(']') === -1 ? undefined : host.indexOf(']'));
+  else if (host.includes(':')) host = host.slice(0, host.indexOf(':'));
+  return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+}
+
+function isCrossSiteRequest(req) {
+  // 1. Modern browsers label the request. Anything not same-origin/none is hostile.
+  const sfs = req.headers['sec-fetch-site'];
+  if (sfs && sfs !== 'same-origin' && sfs !== 'none') return true;
+  // 2. An Origin from a non-loopback site (older browsers, fetch) is hostile.
+  const origin = req.headers.origin;
+  if (origin) {
+    try { if (!isLoopbackHost(new URL(origin).host)) return true; }
+    catch { return true; }
+  }
+  // 3. The Host must be loopback. Defeats DNS-rebinding even when a rebound page
+  //    reports Sec-Fetch-Site: same-origin (its Host is the attacker domain).
+  if (!isLoopbackHost(req.headers.host)) return true;
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname;
@@ -945,6 +982,13 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
+
+  // Block cross-site browser requests to the control API before any routing.
+  if (pathname.startsWith('/api/') && isCrossSiteRequest(req)) {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'cross-site request blocked' }));
+    return;
+  }
 
   // ── SSE watch ──────────────────────────────────────────────────────────────
   if (pathname === '/api/watch') {
@@ -2028,6 +2072,13 @@ ${payload.description || 'Task context and description.'}
   // ── Static files ───────────────────────────────────────────────────────────
   let filePath = path.join(STATIC_DIR, pathname === '/' ? 'index.html' : pathname);
   if (!filePath.startsWith(STATIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  // Never serve secret/config stores or dotfiles from the static dir. `.secrets.json`
+  // (the PAT store) and `config.json` live under STATIC_DIR; without this they are
+  // directly fetchable (e.g. GET /.secrets.json), leaking credentials.
+  const baseName = path.basename(filePath);
+  if (baseName.startsWith('.') || baseName === 'config.json' || /\.(secret|secrets|key|pem|env)$/i.test(baseName)) {
+    res.writeHead(404); res.end('Not found'); return;
+  }
   const contentType = MIME[path.extname(filePath)] || 'application/octet-stream';
   fs.readFile(filePath, (err, data) => {
     if (err) {
