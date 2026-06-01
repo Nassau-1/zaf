@@ -4736,8 +4736,7 @@ function renderControlCliHub() {
     </div>`;
 }
 
-function wireCliHub(container) {
-  // Backup / Restore (TKT-ZAF-0057)
+function wireBackupRestore(container) {
   container.querySelector('#backup-now-btn')?.addEventListener('click', async () => {
     const statusEl = container.querySelector('#backup-status');
     statusEl.textContent = 'Backing up…';
@@ -4759,11 +4758,9 @@ function wireCliHub(container) {
       statusEl.textContent = `✓ Restored ${d.report.restored.length} entries from ${d.report.snapshot}`;
     } catch (e) { statusEl.textContent = '✗ ' + e.message; }
   });
-  const conf = STATE.config || {};
-  const customHarnesses = conf.customHarnesses || [];
-  const allIds = [...CLI_HUB_HARNESSES.map(h => h.id), ...customHarnesses.map(h => h.id)];
+}
 
-  // Kick off status checks for harnesses not yet checked
+function checkCliHarnessStatuses(allIds) {
   for (const id of allIds) {
     if (STATE.cliHubStatus[id] === undefined) {
       STATE.cliHubStatus[id] = null; // mark as in-flight
@@ -4784,8 +4781,9 @@ function wireCliHub(container) {
         });
     }
   }
+}
 
-  // Install buttons
+function wireCliHubInstall(container) {
   container.querySelectorAll('[id^="cli-install-btn-"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const harnessId = btn.dataset.harness;
@@ -4816,8 +4814,9 @@ function wireCliHub(container) {
       }
     });
   });
+}
 
-  // Connect buttons
+function wireCliHubConnect(container) {
   container.querySelectorAll('[id^="cli-connect-btn-"]').forEach(btn => {
     btn.addEventListener('click', async () => {
       const harnessId = btn.dataset.harness;
@@ -4847,8 +4846,9 @@ function wireCliHub(container) {
       }
     });
   });
+}
 
-  // GitHub form
+function wireGithubForm(container) {
   container.querySelector('#zaf-github-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = container.querySelector('#gh-name').value.trim();
@@ -4887,8 +4887,9 @@ function wireCliHub(container) {
     if (sshRow) sshRow.style.display = e.target.value === 'ssh' ? '' : 'none';
     if (patRow) patRow.style.display = e.target.value === 'pat' ? '' : 'none';
   });
+}
 
-  // Custom harness form
+function wireCustomHarnessForm(container) {
   container.querySelector('#zaf-custom-harness-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const displayName = container.querySelector('#ch-name').value.trim();
@@ -4914,6 +4915,20 @@ function wireCliHub(container) {
       statusEl.textContent = '✗ Failed: ' + err.message;
     }
   });
+}
+
+function wireCliHub(container) {
+  wireBackupRestore(container);
+
+  const conf = STATE.config || {};
+  const customHarnesses = conf.customHarnesses || [];
+  const allIds = [...CLI_HUB_HARNESSES.map(h => h.id), ...customHarnesses.map(h => h.id)];
+
+  checkCliHarnessStatuses(allIds);
+  wireCliHubInstall(container);
+  wireCliHubConnect(container);
+  wireGithubForm(container);
+  wireCustomHarnessForm(container);
 }
 
 // =========================================================================
