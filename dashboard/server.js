@@ -1065,6 +1065,7 @@ const server = http.createServer(async (req, res) => {
     }).filter(Boolean);
     // Find repeated sub-sequences of length ≥3 appearing ≥2 times
     const candidates = [];
+    const candidateSigs = new Set();
     for (let len = 5; len >= 3; len--) {
       for (let i = 0; i <= events.length - len; i++) {
         const subseq = events.slice(i, i + len);
@@ -1075,7 +1076,8 @@ const server = http.createServer(async (req, res) => {
           if (s2 === sig) count++;
         }
         if (count >= 2) {
-          if (!candidates.find(c => c.sig === sig)) {
+          if (!candidateSigs.has(sig)) {
+            candidateSigs.add(sig);
             const toolCalls = subseq.filter(e => e.kind === 'tool-call').map(e => e.content.replace(/^.*?(🛠️|\[TOOL CALL\]|Executing tool)\s*/i, '').slice(0, 40));
             const firstDecision = subseq.find(e => e.kind === 'decision' || e.kind === 'response');
             candidates.push({
