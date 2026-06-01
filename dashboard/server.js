@@ -2107,26 +2107,30 @@ ${payload.description || 'Task context and description.'}
 
 // ─── Boot ────────────────────────────────────────────────────────────────────
 
-console.log(`\n╔═══════════════════════════════════════════╗`);
-console.log(`║  ZAF Control Plane  (PTY-grade)           ║`);
-console.log(`╚═══════════════════════════════════════════╝`);
-console.log(`  Repos root : ${REPOS_ROOT}`);
-console.log(`  Port       : ${PORT}`);
+if (require.main === module) {
+  console.log(`\n╔═══════════════════════════════════════════╗`);
+  console.log(`║  ZAF Control Plane  (PTY-grade)           ║`);
+  console.log(`╚═══════════════════════════════════════════╝`);
+  console.log(`  Repos root : ${REPOS_ROOT}`);
+  console.log(`  Port       : ${PORT}`);
 
-runParse();
-migrateConfig();
+  runParse();
+  migrateConfig();
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`\n  ✓ Listening at http://localhost:${PORT}\n`);
-  startWatcher();
-  auditAppend({ kind: 'server.boot', port: PORT, reposRoot: REPOS_ROOT });
-});
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`\n  ✓ Listening at http://localhost:${PORT}\n`);
+    startWatcher();
+    auditAppend({ kind: 'server.boot', port: PORT, reposRoot: REPOS_ROOT });
+  });
 
-server.on('error', err => {
-  if (err.code === 'EADDRINUSE') {
-    console.error(`\n  ✗ Port ${PORT} in use. Set PORT to another port.`);
-  } else {
-    console.error(err);
-  }
-  process.exit(1);
-});
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`\n  ✗ Port ${PORT} in use. Set PORT to another port.`);
+    } else {
+      console.error(err);
+    }
+    process.exit(1);
+  });
+}
+
+module.exports = { readSecrets, writeSecrets };
