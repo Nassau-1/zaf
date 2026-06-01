@@ -155,6 +155,7 @@
 }
 .console-arrow-btn:last-child { border-right: none; border-left: 1px solid var(--border-subtle); }
 .console-arrow-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+.console-arrow-btn:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
 .console-tab-divider {
   width: 1px;
   height: 20px;
