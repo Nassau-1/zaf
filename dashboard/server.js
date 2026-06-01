@@ -16,7 +16,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { execSync, spawn } = require('child_process');
+const { execSync, execFileSync, spawn } = require('child_process');
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
@@ -1594,7 +1594,7 @@ ${payload.description || 'Task context and description.'}
 
       // 3. Git remote add
       if (remoteUrl) {
-        try { execSync(`git remote add origin "${remoteUrl}"`, { cwd: localPath, timeout: 5000, stdio: 'ignore' }); } catch {}
+        try { execFileSync('git', ['remote', 'add', 'origin', remoteUrl], { cwd: localPath, timeout: 5000, stdio: 'ignore' }); } catch {}
       }
 
       // 4. Update config.repos
