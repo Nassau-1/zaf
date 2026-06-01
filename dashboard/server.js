@@ -16,7 +16,9 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { execSync, spawn } = require('child_process');
+const { execSync, exec, spawn } = require('child_process');
+const { promisify } = require('util');
+const execAsync = promisify(exec);
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
@@ -1764,7 +1766,7 @@ ${payload.description || 'Task context and description.'}
       const slug = url.replace(/[^a-z0-9]/gi, '-').slice(-40);
       const tmpDir = path.join(tmpBase, slug);
       if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
-      execSync(`git clone --depth 1 "${url}" "${tmpDir}"`, { timeout: 30000 });
+      await execAsync(`git clone --depth 1 "${url}" "${tmpDir}"`, { timeout: 30000 });
       const scanRoot = subdir ? path.join(tmpDir, subdir) : tmpDir;
       const agents = parseAgentPack(scanRoot, url);
       send(res, 200, { agents, count: agents.length, source: url });
@@ -1880,7 +1882,7 @@ ${payload.description || 'Task context and description.'}
       fs.mkdirSync(tmpBase, { recursive: true });
       const slug = source.replace(/[^a-z0-9]/gi, '-').slice(-40);
       const tmpDir = path.join(tmpBase, slug + '-update-' + Date.now());
-      execSync(`git clone --depth 1 "${source}" "${tmpDir}"`, { timeout: 30000 });
+      await execAsync(`git clone --depth 1 "${source}" "${tmpDir}"`, { timeout: 30000 });
       const incoming = parseAgentPack(tmpDir, source);
       const conf = readConfig() || {};
       const localAgents = Object.entries(conf.agents || {}).filter(([, a]) => a.source === source);
