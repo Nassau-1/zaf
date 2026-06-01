@@ -159,7 +159,7 @@ function restoreLatest() {
   return report;
 }
 
-module.exports = { runBackup, restoreLatest, BACKUP_ROOT, RETENTION };
+module.exports = { runBackup, restoreLatest, classify, BACKUP_ROOT, RETENTION };
 
 // CLI: `node backup.js` runs a backup. `node backup.js restore` restores latest daily.
 if (require.main === module) {
