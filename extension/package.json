@@ -7,9 +7,16 @@
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other"],
-  "activationEvents": ["onStartupFinished"],
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./extension.js",
+  "scripts": {
+    "test": "mocha tests/**/*.test.js"
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -75,11 +82,22 @@
         },
         "zaf.defaultHarness": {
           "type": "string",
-          "enum": ["mock", "zaf", "claude-code", "codex", "gemini-cli"],
+          "enum": [
+            "mock",
+            "zaf",
+            "claude-code",
+            "codex",
+            "gemini-cli"
+          ],
           "default": "mock",
           "description": "Default CLI harness for agent launches"
         }
       }
     }
+  },
+  "devDependencies": {
+    "chai": "^4.4.1",
+    "mocha": "^10.4.0",
+    "sinon": "^18.0.0"
   }
 }
