@@ -197,3 +197,49 @@ try {
     if (fs.existsSync(tempTestScriptPath)) fs.unlinkSync(tempTestScriptPath);
   }, 1500);
 }
+
+// Test 4: copyFileSafe function in dashboard/backup.js
+console.log('\n======================================================');
+console.log('🧪 TEST 4: copyFileSafe Validation');
+console.log('======================================================');
+
+const backupPath = path.join(REPO_ROOT, 'dashboard', 'backup.js');
+let copyFileSafe;
+try {
+  const backupModule = require(backupPath);
+  copyFileSafe = backupModule.copyFileSafe;
+} catch (e) {
+  console.log(`❌ TEST 4 FAILED: Could not load backup.js or missing copyFileSafe export. ${e.message}`);
+}
+
+if (copyFileSafe) {
+  const testSrc = path.join(REPO_ROOT, 'test-src.txt');
+  const testDestDir = path.join(REPO_ROOT, 'test-dest-dir');
+  const testDest = path.join(testDestDir, 'test-src.txt');
+
+  try {
+    // 1. Source does not exist
+    if (fs.existsSync(testSrc)) fs.unlinkSync(testSrc);
+    if (fs.existsSync(testDestDir)) fs.rmSync(testDestDir, { recursive: true, force: true });
+
+    let res = copyFileSafe(testSrc, testDestDir);
+    if (res !== false) throw new Error('Expected copyFileSafe to return false for missing source.');
+
+    // 2. Source exists
+    fs.writeFileSync(testSrc, 'hello world');
+    res = copyFileSafe(testSrc, testDestDir);
+
+    if (res !== true) throw new Error('Expected copyFileSafe to return true for successful copy.');
+    if (!fs.existsSync(testDest)) throw new Error('Expected destination file to exist.');
+
+    const content = fs.readFileSync(testDest, 'utf8');
+    if (content !== 'hello world') throw new Error('Expected destination file content to match.');
+
+    console.log('🎉 TEST 4 PASSED: copyFileSafe properly validated.');
+  } catch (e) {
+    console.log(`❌ TEST 4 FAILED: ${e.message}`);
+  } finally {
+    if (fs.existsSync(testSrc)) fs.unlinkSync(testSrc);
+    if (fs.existsSync(testDestDir)) fs.rmSync(testDestDir, { recursive: true, force: true });
+  }
+}
