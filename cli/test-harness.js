@@ -149,9 +149,53 @@ You are authorized to read and write files ONLY within the following boundaries:
   }
 }
 
-// Test 3: Turn budget looping termination
+// Test 3: findRepoRoot directory traversal
 console.log('\n======================================================');
-console.log('🧪 TEST 3: Turn-Budget Loop Telemetry Tracking');
+console.log('🧪 TEST 3: findRepoRoot directory traversal');
+console.log('======================================================');
+
+const zafScriptPath = path.join(REPO_ROOT, 'cli', 'zaf.js');
+const zafCode = fs.readFileSync(zafScriptPath, 'utf8');
+const match = zafCode.match(/function findRepoRoot\([\s\S]*?\n\}/);
+if (!match) {
+  throw new Error('❌ TEST 3 FAILED: findRepoRoot function not found in zaf.js');
+}
+
+// Evaluate the function string to create the findRepoRoot function in the local scope
+const findRepoRootStr = match[0];
+let testFindRepoRoot;
+eval(`testFindRepoRoot = ${findRepoRootStr}`);
+
+console.log('Running testFindRepoRoot test cases...');
+
+// Case 1: Happy Path
+let fileExistsMock1 = (p) => p.includes('TICKETS.md');
+let res1 = testFindRepoRoot('/home/user/project', fileExistsMock1);
+if (res1 !== '/home/user/project') {
+  throw new Error(`❌ TEST 3 FAILED: Expected /home/user/project, got ${res1}`);
+}
+console.log('✅ Case 1 Passed: Found in current directory');
+
+// Case 2: Traversal
+let fileExistsMock2 = (p) => p === path.join('/home/user/project', 'WIP', 'tickets', 'TICKETS.md');
+let res2 = testFindRepoRoot('/home/user/project/nested/dir', fileExistsMock2);
+if (res2 !== '/home/user/project') {
+  throw new Error(`❌ TEST 3 FAILED: Expected /home/user/project, got ${res2}`);
+}
+console.log('✅ Case 2 Passed: Found in parent directory');
+
+// Case 3: Edge Case (Not Found)
+let fileExistsMock3 = (p) => false;
+let res3 = testFindRepoRoot('/home/user/project/nested/dir', fileExistsMock3);
+if (res3 !== '/home/user/project/nested/dir') {
+  throw new Error(`❌ TEST 3 FAILED: Expected /home/user/project/nested/dir, got ${res3}`);
+}
+console.log('✅ Case 3 Passed: Not found, returned start directory');
+console.log('🎉 TEST 3 PASSED.');
+
+// Test 4: Turn budget looping termination
+console.log('\n======================================================');
+console.log('🧪 TEST 4: Turn-Budget Loop Telemetry Tracking');
 console.log('======================================================');
 
 // We simulate turn budget loop logic using standard spawn
@@ -186,9 +230,9 @@ try {
   child.on('close', () => {
     console.log(`✅ Mock subshell ended. Turns reached: ${turns}`);
     if (killedByTelemetry && turns === 5) {
-      console.log('🎉 TEST 3 PASSED: Turn-Budget telemetry triggered safe termination correctly.');
+      console.log('🎉 TEST 4 PASSED: Turn-Budget telemetry triggered safe termination correctly.');
     } else {
-      console.log('❌ TEST 3 FAILED: Turn-Budget telemetry was not triggered.');
+      console.log('❌ TEST 4 FAILED: Turn-Budget telemetry was not triggered.');
     }
   });
   

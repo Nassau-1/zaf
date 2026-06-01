@@ -42,16 +42,16 @@ Examples:
 
 // Repo Root Auto-Discovery
 
-function findRepoRoot() {
-  let current = process.cwd();
+function findRepoRoot(startDir = process.cwd(), fileExists = fs.existsSync) {
+  let current = startDir;
   while (true) {
     const ticketsIndex = path.join(current, 'WIP', 'tickets', 'TICKETS.md');
-    if (fs.existsSync(ticketsIndex)) {
+    if (fileExists(ticketsIndex)) {
       return current;
     }
     const parent = path.dirname(current);
     if (parent === current) {
-      return process.cwd();
+      return startDir;
     }
     current = parent;
   }
