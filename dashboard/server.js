@@ -941,7 +941,19 @@ function readJsonBody(req) {
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname;
-  res.setHeader('Access-Control-Allow-Origin', '*');
+
+  const origin = req.headers.origin;
+  if (origin) {
+    try {
+      const u = new URL(origin);
+      if (u.hostname === 'localhost' || u.hostname === '127.0.0.1') {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+      }
+    } catch (e) {
+      // Ignore invalid origins
+    }
+  }
+
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
