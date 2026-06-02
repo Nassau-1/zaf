@@ -3739,10 +3739,13 @@ function wireAgentEditor(container) {
 
   const personaPreview = container.querySelector('#persona-preview');
   const updatePersona = () => {
-    const id = container.querySelector('#agent-struct-role').value;
+    const structRoleEl = container.querySelector('#agent-struct-role');
+    if (!structRoleEl) return;
+    const id = structRoleEl.value;
     const p = getStructuralPersonas()[id];
     if (!p) return;
-    personaPreview.textContent =
+    if (personaPreview) {
+      personaPreview.textContent =
 `STRUCTURAL ROLE: ${p.label}
 ─────────────────────────────────
 PERSONA INSTRUCTION:
@@ -3750,6 +3753,7 @@ ${p.persona}
 
 OPERATIONAL BOUNDS:
 ${p.bounds}`;
+    }
   };
   container.querySelector('#agent-struct-role')?.addEventListener('change', updatePersona);
   updatePersona();
@@ -3867,7 +3871,7 @@ ${p.bounds}`;
   });
 
   // Save form
-  container.querySelector('#zaf-agent-form').addEventListener('submit', async (e) => {
+  container.querySelector('#zaf-agent-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const key = selector.value;
     const c = STATE.config.agents[key];
@@ -3889,7 +3893,7 @@ ${p.bounds}`;
   });
 
   // Tool registration
-  container.querySelector('#tool-form').addEventListener('submit', async (e) => {
+  container.querySelector('#tool-form')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const id = container.querySelector('#new-tool-id').value.replace(/[^a-zA-Z0-9]/g, '');
     const name = container.querySelector('#new-tool-name').value;
