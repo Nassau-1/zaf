@@ -25,7 +25,7 @@ const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 const PORT = parseInt(process.env.PORT || '4242', 10);
 const REPOS_ROOT = path.resolve(process.env.REPOS_ROOT || path.resolve(__dirname, '../../'));
 
-const STATIC_DIR = __dirname;
+const STATIC_DIR = path.resolve(__dirname);
 const PARSE_SCRIPT = path.join(__dirname, 'parse.js');
 const DATA_FILE = path.join(__dirname, 'data.json');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
@@ -2084,8 +2084,17 @@ ${payload.description || 'Task context and description.'}
   }
 
   // ── Static files ───────────────────────────────────────────────────────────
-  let filePath = path.join(STATIC_DIR, pathname === '/' ? 'index.html' : pathname);
-  if (!filePath.startsWith(STATIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  let decodedPathname;
+  try {
+    decodedPathname = decodeURIComponent(pathname);
+  } catch (e) {
+    decodedPathname = pathname;
+  }
+  if (decodedPathname.indexOf('\0') !== -1) {
+    res.writeHead(400); res.end('Bad Request'); return;
+  }
+  let filePath = path.join(STATIC_DIR, decodedPathname === '/' ? 'index.html' : decodedPathname);
+  if (!filePath.startsWith(STATIC_DIR + path.sep) && filePath !== path.join(STATIC_DIR, 'index.html')) { res.writeHead(403); res.end('Forbidden'); return; }
   // Never serve secret/config stores or dotfiles from the static dir. `.secrets.json`
   // (the PAT store) and `config.json` live under STATIC_DIR; without this they are
   // directly fetchable (e.g. GET /.secrets.json), leaking credentials.
