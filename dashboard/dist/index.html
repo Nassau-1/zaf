@@ -26,6 +26,7 @@
       <select id="repo-select" class="repo-select">
         <option value="">All Repos</option>
       </select>
+      <button class="btn btn-secondary" id="sidebar-new-repo" style="width:100%;margin-top:6px;font-size:11px;padding:5px 8px;">+ New Repo</button>
     </div>
 
     <div class="sidebar-section">
@@ -44,12 +45,19 @@
         <span class="nav-icon">▦</span><span>Board</span>
         <span class="nav-badge" id="badge-active">—</span>
       </a>
+      <a class="nav-item" id="nav-fleet" data-view="fleet" href="#fleet">
+        <span class="nav-icon">⚡</span><span>Fleet</span>
+        <span class="nav-badge" id="badge-fleet">—</span>
+      </a>
       <a class="nav-item" id="nav-graph" data-view="graph" href="#graph">
         <span class="nav-icon">⬡</span><span>Dependency Graph</span>
       </a>
       <a class="nav-item" id="nav-archive" data-view="archive" href="#archive">
         <span class="nav-icon">⏳</span><span>Archive</span>
         <span class="nav-badge" id="badge-archived">—</span>
+      </a>
+      <a class="nav-item" id="nav-codebase" data-view="codebase" href="#codebase">
+        <span class="nav-icon">⊛</span><span>Codebase Map</span>
       </a>
     </div>
 
@@ -104,6 +112,7 @@
       </div>
     </div>
 
+    <div id="main-lower">
     <div style="display:flex; flex:1; overflow:hidden; min-height:0;">
       <div id="content">
         <div class="loading-screen" id="loading-screen">
@@ -117,7 +126,7 @@
           <div class="detail-header-top">
             <span class="detail-id" id="detail-id"></span>
             <button class="btn-run-agent hidden" id="detail-run-btn">▶ Run Agent</button>
-            <div class="detail-close" id="detail-close" title="Close">✕</div>
+            <button class="detail-close" id="detail-close" title="Close" aria-label="Close detail panel">✕</button>
           </div>
           <div class="detail-title" id="detail-title"></div>
           <div class="detail-meta-row" id="detail-meta-row"></div>
@@ -129,8 +138,7 @@
         </div>
       </div>
     </div>
-  </div>
-
+    <div id="console-resize-handle"></div>
   <!-- ─── Multi-Console Terminal Panel ───────────────────────── -->
   <div id="console-panel">
     <div class="console-panel-header">
@@ -140,12 +148,17 @@
         <span class="console-panel-subtitle" id="console-panel-subtitle">— No active subshells</span>
       </div>
       <div class="console-panel-actions">
+        <button class="console-btn" id="console-jump-latest" title="Switch to most recent live process and scroll to bottom">↓ Latest</button>
         <button class="console-btn" id="console-clear-terminated">Clear terminated</button>
         <button class="console-btn" id="console-kill-active" title="Kill the focused running shell">⏻ Kill focused</button>
         <button class="console-btn" id="console-panel-close">✕ Hide</button>
       </div>
     </div>
-    <div class="console-tabs" id="console-tabs"></div>
+    <div class="console-tab-bar-wrap">
+      <button class="console-arrow-btn" id="console-tabs-prev" title="Scroll tabs left" aria-label="Previous tab">&lt;</button>
+      <div class="console-tabs" id="console-tabs"></div>
+      <button class="console-arrow-btn" id="console-tabs-next" title="Scroll tabs right" aria-label="Next tab">&gt;</button>
+    </div>
     <div class="console-bodies" id="console-bodies">
       <div class="console-empty" id="console-empty">
         <div class="console-empty-title">No active subshells</div>
@@ -153,8 +166,13 @@
       </div>
     </div>
   </div>
+    </div>
+  </div>
 </div>
 
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <script src="app.js"></script>
 </body>

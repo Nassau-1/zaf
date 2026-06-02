@@ -3207,7 +3207,7 @@ function renderAudit(container) {
 let _cbCtx = null; // cached context for current repo
 
 async function renderCodebaseMap(container) {
-  const repo = STATE.filters.repo || (STATE.data?.repos?.[0]?.id) || 'zaf';
+  const repo = STATE.selectedRepo || (STATE.data?.repos?.[0]?.id) || 'zaf';
   container.innerHTML = `
     <div class="view-graph fade-in" style="display:flex;flex-direction:column;height:100%;gap:0;">
       <div class="graph-toolbar" style="flex-shrink:0;">
@@ -3615,7 +3615,7 @@ function renderControlAgentEditor() {
           <div class="zaf-field"><label>Structural Role (alters generated persona & bounds)</label>
             <div style="display:flex;gap:8px;align-items:center">
               <select id="agent-struct-role" style="flex:1">
-                ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}${p.builtin===false?' ·custom':''}</option>`).join('')}
+                ${Object.entries(getStructuralPersonas()).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}${p.builtin===false?' ·custom':''}</option>`).join('')}
               </select>
               <button type="button" class="zaf-btn secondary" id="agent-manage-roles-btn" title="Add, edit or remove custom structural roles">Manage roles…</button>
             </div>
@@ -3740,7 +3740,7 @@ function wireAgentEditor(container) {
   const personaPreview = container.querySelector('#persona-preview');
   const updatePersona = () => {
     const id = container.querySelector('#agent-struct-role').value;
-    const p = STRUCTURAL_PERSONAS[id];
+    const p = getStructuralPersonas()[id];
     if (!p) return;
     personaPreview.textContent =
 `STRUCTURAL ROLE: ${p.label}
@@ -3967,7 +3967,7 @@ function renderControlMarketplace() {
         <div class="zaf-field"><label>Default Structural Role</label>
           <select id="mkt-def-struct">
             <option value="">— none —</option>
-            ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${md.structuralRole===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
+            ${Object.entries(getStructuralPersonas()).map(([id,p]) => `<option value="${id}" ${md.structuralRole===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
           </select>
         </div>
         <div class="zaf-field"><label>Default Heartbeat (s)</label>
@@ -4293,7 +4293,7 @@ function openAgentDetailFlyout(key, hostContainer) {
         </div>
         <div class="zaf-field"><label>Structural Role</label>
           <select id="fly-structRole">
-            ${Object.entries(STRUCTURAL_PERSONAS).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
+            ${Object.entries(getStructuralPersonas()).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
           </select>
         </div>
         <div class="zaf-field"><label>Heartbeat (seconds)</label>
@@ -5041,7 +5041,8 @@ function drawOrgCanvas() {
           const ax = 12, ay = 56 + i*32, aw = TEAM_W - 24, ah = 26;
           const roleClass = `role-${a.structuralRole || 'worker'}`;
           const isAgentSelected = STATE.selectedOrgAgentKey === m;
-          const persona = STRUCTURAL_PERSONAS[a.structuralRole] || STRUCTURAL_PERSONAS.worker;
+          const personas = getStructuralPersonas();
+          const persona = personas[a.structuralRole] || personas.worker;
           return `
             <g class="org-agent-node" data-agent-key="${m}" data-team-id="${team.id}" transform="translate(${ax},${ay})">
               <rect class="org-agent-rect ${roleClass} ${isAgentSelected?'selected':''}" width="${aw}" height="${ah}" rx="4" />
@@ -5491,7 +5492,7 @@ function renderOrgInspector() {
       <div style="font-size:10px;color:var(--text-muted)">Agent <strong style="color:var(--text-primary)">${k}</strong></div>
       <div class="meta-field"><label>Role name</label><input id="ag-name" value="${safeHTML(a.roleName)}" /></div>
       <div class="meta-field"><label>Structural role</label>
-        <select id="ag-struct">${Object.entries(STRUCTURAL_PERSONAS).map(([id,p])=>`<option value="${id}" ${a.structuralRole===id?'selected':''}>${p.label}</option>`).join('')}</select>
+        <select id="ag-struct">${Object.entries(getStructuralPersonas()).map(([id,p])=>`<option value="${id}" ${a.structuralRole===id?'selected':''}>${p.label}</option>`).join('')}</select>
       </div>
       <div class="meta-field"><label>Supervisor (N+1)</label>
         <select id="ag-mgr">
@@ -5511,7 +5512,7 @@ function renderOrgInspector() {
       </div>`;
     const upd = () => {
       const id = document.getElementById('ag-struct').value;
-      const p = STRUCTURAL_PERSONAS[id];
+      const p = getStructuralPersonas()[id];
       document.getElementById('ag-persona').textContent =
 `PERSONA — ${p.label}
 
