@@ -405,6 +405,8 @@ function composeSeedPrompt(opts, ticketBody) {
   const { ticketId, role, modelId, model, reasoning, heartbeat, promptAddendum, ticketTitle, repoName, personality, tools, toolsRegistry } = opts;
   const effectiveModel = modelId || model || '(default for this CLI)';
   const personalitySection = personality ? `\n## Personality & Scope\n${personality}\n` : '';
+  const repoRoot = repoName ? path.resolve(REPOS_ROOT, repoName) : null;
+  const absTicketPath = repoRoot ? path.join(repoRoot, 'WIP', 'tickets', 'ACTIVE', `${ticketId}.md`).replace(/\\/g, '/') : null;
 
   // Authorized Tools (TKT-ZAF-0060) — enumerate the agent's permitted tool set.
   let toolsSection = '';
@@ -459,7 +461,7 @@ You are operating under the ZO Agentic Framework (ZAF) control plane. Read this 
 ${personalitySection}${toolsSection}${codebaseSection}${skillsSection}
 ## Ticket Reference
 
-Read the ticket file at \`WIP/tickets/ACTIVE/${ticketId}.md\` and proceed.
+Read the ticket file at \`${absTicketPath || `WIP/tickets/ACTIVE/${ticketId}.md`}\` and proceed.
 
 ## Operational constraints (hard requirements)
 1. **Stay within ticket scope.** Read/write only files under the target repo, and only files relevant to this ticket.
