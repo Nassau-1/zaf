@@ -3576,7 +3576,7 @@ function renderControlAgentEditor() {
         <h2>Agent Builder</h2>
         <div class="zaf-field"><label>Editing agent</label>
           <div style="font-size:10px;color:var(--text-muted);margin:-2px 0 6px;line-height:1.4">
-            Pick which agent to edit. Each row in this list IS the profile — an agent's saved roleName, harness, model, reasoning, structural role, heartbeat and tool set together form a reusable profile. To create a new profile, duplicate an existing agent (sets up a `<key>-copy` you can rename) or use Org Builder's "+ Create new agent".
+            Pick which agent to edit. Each row in this list IS the profile — an agent's saved roleName, harness, model, reasoning, structural role, heartbeat and tool set together form a reusable profile. To create a new profile, duplicate an existing agent (sets up a \`<key>-copy\` you can rename) or use Org Builder's "+ Create new agent".
           </div>
           <div style="display:flex;gap:8px;align-items:center">
             <select id="agent-selector" style="flex:1">${keys.map(k => `<option value="${k}" ${k===key?'selected':''}>${agents[k].roleName} (${k})</option>`).join('')}</select>
