@@ -2,3 +2,8 @@
 **Vulnerability:** Arbitrary command injection via unsanitized user inputs (`remoteUrl`) passed to `execSync` string interpolations for commands like `git clone`, `git config`, `git init`, and `git remote`.
 **Learning:** Using string interpolation with `execSync` executes the entire string via a subshell by default, allowing attackers to terminate the intended command and inject their own using shell metacharacters (e.g., `;`, `&`, `|`).
 **Prevention:** Use `execFileSync('git', ['clone', remoteUrl, ...])` instead. This bypasses the shell completely and directly invokes the executable with a safe array of arguments, preventing any injected shell operators from being evaluated.
+
+## 2026-06-03 - Path Traversal bypass via startsWith prefix matching
+**Vulnerability:** A static file server checked `if (!filePath.startsWith(STATIC_DIR))` to ensure requested files stayed within `STATIC_DIR` (e.g., `/app/dashboard`). However, `path.join('/app/dashboard', '../dashboard-secrets/foo.txt')` yields `/app/dashboard-secrets/foo.txt`, which strictly `startsWith` `/app/dashboard` but actually traverses out to a sibling directory.
+**Learning:** Checking path containment with raw string `startsWith` is inherently vulnerable when paths don't end in a trailing slash, as an attacker can traverse out and request a sibling directory with a name sharing a common prefix.
+**Prevention:** Always decode URIs, reject null bytes, fully resolve paths using `path.resolve()`, and append `path.sep` to the allowed directory (`path.resolve(STATIC_DIR) + path.sep`) before using `startsWith`. Or better, explicitly verify that `filePath` is strictly a child directory of the base by ensuring it starts with the normalized base *plus* a trailing slash, and allow an exact match fallback.
