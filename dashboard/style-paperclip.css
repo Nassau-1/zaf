@@ -1024,8 +1024,10 @@
 .zaf-launch-close {
   background: transparent; border: none; color: var(--text-muted);
   font-size: 18px; cursor: pointer; line-height: 1; padding: 2px 6px;
+  outline: none;
 }
 .zaf-launch-close:hover { color: var(--text-primary); }
+.zaf-launch-close:focus-visible { box-shadow: 0 0 0 2px var(--indigo-500); border-radius: 4px; }
 .zaf-launch-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
 .zaf-launch-footer {
   padding: 12px 20px; border-top: 1px solid var(--border-subtle);
