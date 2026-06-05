@@ -2002,9 +2002,10 @@ ${payload.description || 'Task context and description.'}
     const skillsDir = path.join(path.resolve(REPOS_ROOT, repoSlug), '.zaf-skills');
     try {
       if (!fs.existsSync(skillsDir)) return send(res, 200, { skills: [] });
-      const files = fs.readdirSync(skillsDir).filter(f => f.endsWith('.zaf-skill.md'));
-      const skills = files.map(f => {
-        const content = fs.readFileSync(path.join(skillsDir, f), 'utf8');
+      const files = (await fs.promises.readdir(skillsDir)).filter(f => f.endsWith('.zaf-skill.md'));
+      // ⚡ Bolt: Replaced synchronous file reads with concurrent async reads to prevent event loop blocking
+      const skills = await Promise.all(files.map(async f => {
+        const content = await fs.promises.readFile(path.join(skillsDir, f), 'utf8');
         const fm = parseFrontmatter(content);
         return {
           filename: f,
@@ -2016,7 +2017,7 @@ ${payload.description || 'Task context and description.'}
           created: fm.created || '',
           body: bodyAfterFrontmatter(content),
         };
-      });
+      }));
       send(res, 200, { skills });
     } catch (e) { send(res, 500, { error: e.message }); }
     return;
