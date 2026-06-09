@@ -823,7 +823,7 @@ function extractFileRefsFromTicket(content) {
   return refs;
 }
 
-function updateDecorations(editor, context) {
+async function updateDecorations(editor, context) {
   if (!editor) return;
   ensureDecorationType(context);
 
@@ -837,11 +837,13 @@ function updateDecorations(editor, context) {
   const decorations = [];
 
   try {
-    const ticketFiles = fs.readdirSync(activeDir).filter(f => f.endsWith('.md'));
-    for (const tf of ticketFiles) {
+    const files = await fs.promises.readdir(activeDir);
+    const ticketFiles = files.filter(f => f.endsWith('.md'));
+
+    await Promise.all(ticketFiles.map(async tf => {
       const ticketPath = path.join(activeDir, tf);
       let content;
-      try { content = fs.readFileSync(ticketPath, 'utf8'); } catch { continue; }
+      try { content = await fs.promises.readFile(ticketPath, 'utf8'); } catch { return; }
 
       const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
       let ticketId = path.basename(tf, '.md');
@@ -875,7 +877,7 @@ function updateDecorations(editor, context) {
         hover.appendMarkdown(`\n[▶ Open Detail](command:zaf.openDetail?${encodeURIComponent(JSON.stringify(ticketId))})`);
         decorations.push({ range, hoverMessage: hover });
       }
-    }
+    }));
   } catch (err) {
     console.error('[ZAF] Gutter update error:', err);
   }
@@ -911,7 +913,7 @@ function activate(context) {
       vscode.window.showInformationMessage('ZAF: Refreshed');
     }),
 
-    vscode.commands.registerCommand('zaf.launchAgent', () => {
+    vscode.commands.registerCommand('zaf.launchAgent', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { vscode.window.showWarningMessage('ZAF: No active editor'); return; }
       const root = getWorkspaceRoot();
@@ -922,8 +924,11 @@ function activate(context) {
       if (!fs.existsSync(activeDir)) { vscode.window.showWarningMessage('ZAF: No active tickets dir'); return; }
       const matches = [];
       try {
-        for (const tf of fs.readdirSync(activeDir).filter(f => f.endsWith('.md'))) {
-          const content = fs.readFileSync(path.join(activeDir, tf), 'utf8');
+        const files = await fs.promises.readdir(activeDir);
+        const ticketFiles = files.filter(f => f.endsWith('.md'));
+
+        await Promise.all(ticketFiles.map(async tf => {
+          const content = await fs.promises.readFile(path.join(activeDir, tf), 'utf8');
           const refs = extractFileRefsFromTicket(content);
           if (refs.some(r => relPath.endsWith(r.filePath.replace(/\\/g, '/')))) {
             const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
@@ -931,7 +936,7 @@ function activate(context) {
             if (yamlMatch) { for (const l of yamlMatch[1].split('\n')) { if (l.startsWith('id:')) id = l.slice(3).trim(); } }
             matches.push(id);
           }
-        }
+        }));
       } catch {}
       if (!matches.length) {
         vscode.window.showWarningMessage('ZAF: No active ticket references this file');
