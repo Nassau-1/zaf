@@ -2338,7 +2338,7 @@ function renderConsoleTabs() {
         <span class="tab-meta">${dur}</span>
         ${meta.status === 'pre-fire' || meta.status === 'pre-fire-paused' ? `<span id="${prefireId}" class="tab-meta" style="color:#f59e0b">⏱ pre-fire</span>` : ''}
         ${loopFlag ? `<span class="tab-loop-badge" title="${safeHTML(loopFlag.msg)}">⟳ loop</span>` : ''}
-        <span class="tab-close" data-close="${meta.processId}" title="Remove from tabs">✕</span>
+        <button class="tab-close" aria-label="Close tab" data-close="${meta.processId}" title="Remove from tabs">✕</button>
       </div>`;
   }
 
