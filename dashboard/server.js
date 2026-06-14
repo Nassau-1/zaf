@@ -2000,24 +2000,29 @@ ${payload.description || 'Task context and description.'}
     const repoSlug = parsed.query.repo;
     if (!repoSlug) return send(res, 400, { error: 'repo required' });
     const skillsDir = path.join(path.resolve(REPOS_ROOT, repoSlug), '.zaf-skills');
+    // ⚡ Bolt: Replace fs.readFileSync inside map with fs.promises.readFile and Promise.all to prevent event loop blocking
     try {
       if (!fs.existsSync(skillsDir)) return send(res, 200, { skills: [] });
-      const files = fs.readdirSync(skillsDir).filter(f => f.endsWith('.zaf-skill.md'));
-      const skills = files.map(f => {
-        const content = fs.readFileSync(path.join(skillsDir, f), 'utf8');
-        const fm = parseFrontmatter(content);
-        return {
-          filename: f,
-          name: fm.name || f.replace('.zaf-skill.md', ''),
-          description: fm.description || '',
-          tools: fm.tools ? fm.tools.split(',').map(t => t.trim().replace(/^-\s*/, '')).filter(Boolean) : [],
-          source: fm.source || 'manual',
-          extractedFrom: fm.extractedFrom || '',
-          created: fm.created || '',
-          body: bodyAfterFrontmatter(content),
-        };
-      });
-      send(res, 200, { skills });
+      fs.promises.readdir(skillsDir)
+        .then(async files => {
+          const filteredFiles = files.filter(f => f.endsWith('.zaf-skill.md'));
+          const skills = await Promise.all(filteredFiles.map(async f => {
+            const content = await fs.promises.readFile(path.join(skillsDir, f), 'utf8');
+            const fm = parseFrontmatter(content);
+            return {
+              filename: f,
+              name: fm.name || f.replace('.zaf-skill.md', ''),
+              description: fm.description || '',
+              tools: fm.tools ? fm.tools.split(',').map(t => t.trim().replace(/^-\s*/, '')).filter(Boolean) : [],
+              source: fm.source || 'manual',
+              extractedFrom: fm.extractedFrom || '',
+              created: fm.created || '',
+              body: bodyAfterFrontmatter(content),
+            };
+          }));
+          send(res, 200, { skills });
+        })
+        .catch(e => send(res, 500, { error: e.message }));
     } catch (e) { send(res, 500, { error: e.message }); }
     return;
   }
