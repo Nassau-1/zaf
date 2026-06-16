@@ -1,4 +1,4 @@
-## 2026-06-01 - Command Injection in Git Clone via execSync
-**Vulnerability:** Arbitrary command injection via unsanitized user inputs (`remoteUrl`) passed to `execSync` string interpolations for commands like `git clone`, `git config`, `git init`, and `git remote`.
-**Learning:** Using string interpolation with `execSync` executes the entire string via a subshell by default, allowing attackers to terminate the intended command and inject their own using shell metacharacters (e.g., `;`, `&`, `|`).
-**Prevention:** Use `execFileSync('git', ['clone', remoteUrl, ...])` instead. This bypasses the shell completely and directly invokes the executable with a safe array of arguments, preventing any injected shell operators from being evaluated.
+## 2026-06-16 - Path Traversal via Incomplete Boundary Prefix Check
+**Vulnerability:** A static file server allowed escaping the root directory by requesting paths like `../dashboard-secrets` because the boundary check relied on `filePath.startsWith(STATIC_DIR)` instead of `filePath.startsWith(STATIC_DIR + path.sep)`. Also, URL-encoded paths (`%2e%2e`) and poison null bytes (`%00`) were not handled.
+**Learning:** Checking `path.startsWith()` against a base directory string is insufficient and vulnerable to prefix bypass attacks (where `base-directory-secrets` starts with `base-directory`). Furthermore, Node's built-in `http` module does not automatically URI decode or strip null bytes from `req.url`.
+**Prevention:** Always append `path.sep` when using string prefixes to check directory boundaries (e.g., `path.startsWith(DIR + path.sep)`), or use `path.relative` to ensure the path doesn't start with `..`. Explicitly decode URIs within a `try-catch` block and reject strings containing `\0`.
