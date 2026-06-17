@@ -985,7 +985,15 @@ function isCrossSiteRequest(req) {
 
 const server = http.createServer(async (req, res) => {
   const parsed = url.parse(req.url, true);
-  const pathname = parsed.pathname;
+  let pathname = parsed.pathname;
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch (err) {
+    res.writeHead(400); res.end('Bad Request'); return;
+  }
+  if (pathname.indexOf('\0') !== -1) {
+    res.writeHead(400); res.end('Bad Request'); return;
+  }
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -2085,7 +2093,7 @@ ${payload.description || 'Task context and description.'}
 
   // ── Static files ───────────────────────────────────────────────────────────
   let filePath = path.join(STATIC_DIR, pathname === '/' ? 'index.html' : pathname);
-  if (!filePath.startsWith(STATIC_DIR)) { res.writeHead(403); res.end('Forbidden'); return; }
+  if (filePath !== STATIC_DIR && !filePath.startsWith(STATIC_DIR + path.sep)) { res.writeHead(403); res.end('Forbidden'); return; }
   // Never serve secret/config stores or dotfiles from the static dir. `.secrets.json`
   // (the PAT store) and `config.json` live under STATIC_DIR; without this they are
   // directly fetchable (e.g. GET /.secrets.json), leaking credentials.
