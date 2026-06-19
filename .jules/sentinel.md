@@ -1,4 +1,4 @@
-## 2026-06-01 - Command Injection in Git Clone via execSync
-**Vulnerability:** Arbitrary command injection via unsanitized user inputs (`remoteUrl`) passed to `execSync` string interpolations for commands like `git clone`, `git config`, `git init`, and `git remote`.
-**Learning:** Using string interpolation with `execSync` executes the entire string via a subshell by default, allowing attackers to terminate the intended command and inject their own using shell metacharacters (e.g., `;`, `&`, `|`).
-**Prevention:** Use `execFileSync('git', ['clone', remoteUrl, ...])` instead. This bypasses the shell completely and directly invokes the executable with a safe array of arguments, preventing any injected shell operators from being evaluated.
+## 2026-06-19 - Path Traversal via Missing decodeURIComponent and Prefix Check Bypass
+**Vulnerability:** The static file server did not decode URLs before checking boundaries, allowed poison null bytes (`\0`), and had a vulnerable prefix check (`!filePath.startsWith(STATIC_DIR)`) which could be bypassed by creating a directory like `dashboard-secret` alongside `dashboard`.
+**Learning:** Checking for directory boundaries using `startsWith` on strings is insufficient without adding `path.sep` to ensure exact directory boundaries. Furthermore, URL paths must always be decoded, and null bytes explicitly rejected, before any path manipulations or validations occur.
+**Prevention:** Always use `decodeURIComponent` wrapped in a `try...catch` block. Check for `.includes('\0')`. Fix boundary checks by ensuring exact root match (`filePath === STATIC_DIR`) OR checking that it starts with the directory plus separator (`filePath.startsWith(STATIC_DIR + path.sep)`).
