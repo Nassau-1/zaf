@@ -724,6 +724,9 @@ html, body {
 .filter-select option { background: var(--bg-card); }
 
 .filter-clear {
+  background: transparent;
+  border: none;
+  font-family: inherit;
   font-size: 11px;
   color: var(--text-muted);
   cursor: pointer;
@@ -732,6 +735,7 @@ html, body {
   transition: color var(--t-fast), background var(--t-fast);
 }
 .filter-clear:hover { color: var(--text-primary); background: var(--bg-card); }
+.filter-clear:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
 
 .board-result-count {
   margin-left: auto;

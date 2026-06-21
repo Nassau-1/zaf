@@ -850,7 +850,7 @@ function renderBoard(container) {
         <select class="filter-select" id="filter-phase">${phaseOptions}</select>
         <select class="filter-select" id="filter-status">${statusOptions}</select>
         <select class="filter-select" id="filter-priority">${prioOptions}</select>
-        ${hasFilters ? `<span class="filter-clear" id="filter-clear">✕ Clear filters</span>` : ''}
+        ${hasFilters ? `<button class="filter-clear" id="filter-clear" aria-label="Clear filters">✕ Clear filters</button>` : ''}
         <div class="board-result-count">${tickets.length} of ${active.length} tickets</div>
       </div>
       <div class="board-columns">${columns}</div>
@@ -1145,7 +1145,7 @@ function openLaunchPopover(ticket) {
           <div class="zaf-launch-title">▶ Launch agent on <span style="color:var(--indigo-400);font-family:'JetBrains Mono',monospace">${ticket.id}</span></div>
           <div class="zaf-launch-sub">${safeHTML(ticket.title)}</div>
         </div>
-        <button class="zaf-launch-close" id="zaf-launch-close" title="Close">✕</button>
+        <button class="zaf-launch-close" id="zaf-launch-close" title="Close" aria-label="Close">✕</button>
       </div>
 
       <div class="zaf-launch-body">
@@ -1632,7 +1632,7 @@ function openNewProgrammeModal() {
     <div class="zaf-launch-panel" style="max-width:440px">
       <div class="zaf-launch-header">
         <span class="zaf-launch-title">New Programme</span>
-        <button class="zaf-launch-close" id="prog-modal-close">✕</button>
+        <button class="zaf-launch-close" id="prog-modal-close" title="Close" aria-label="Close">✕</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;padding:16px 0">
         <div class="zaf-field"><label>Programme ID (e.g. PROG-ZAF-002)</label>
@@ -1714,7 +1714,7 @@ function openNewRepoWizard() {
           <div class="zaf-launch-title">+ New Repository</div>
           <div class="zaf-launch-sub">Create and scaffold a new project repository</div>
         </div>
-        <button class="zaf-launch-close" id="nr-close">✕</button>
+        <button class="zaf-launch-close" id="nr-close" title="Close" aria-label="Close">✕</button>
       </div>
       <div class="zaf-launch-body" id="nr-body">
         <!-- Step 1 rendered here -->
@@ -2338,7 +2338,7 @@ function renderConsoleTabs() {
         <span class="tab-meta">${dur}</span>
         ${meta.status === 'pre-fire' || meta.status === 'pre-fire-paused' ? `<span id="${prefireId}" class="tab-meta" style="color:#f59e0b">⏱ pre-fire</span>` : ''}
         ${loopFlag ? `<span class="tab-loop-badge" title="${safeHTML(loopFlag.msg)}">⟳ loop</span>` : ''}
-        <span class="tab-close" data-close="${meta.processId}" title="Remove from tabs">✕</span>
+        <button class="tab-close" data-close="${meta.processId}" title="Remove from tabs" aria-label="Remove from tabs">✕</button>
       </div>`;
   }
 
@@ -4273,7 +4273,7 @@ function openAgentDetailFlyout(key, hostContainer) {
           <div style="font-size:14px;font-weight:700;color:var(--text-primary)">${safeHTML(a.roleName || key)}</div>
           <div style="font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace">${safeHTML(key)}</div>
         </div>
-        <button class="zaf-launch-close" id="zaf-agent-flyout-close" title="Close">✕</button>
+        <button class="zaf-launch-close" id="zaf-agent-flyout-close" title="Close" aria-label="Close">✕</button>
       </header>
       <form id="zaf-agent-flyout-form" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;overflow-y:auto;">
         <div class="zaf-field"><label>Role Name</label>
@@ -5205,7 +5205,7 @@ function openStructuralRolesModal(hostContainer) {
           <div class="zaf-launch-title">Manage structural roles</div>
           <div class="zaf-launch-sub">Built-ins (thinker / reviewer / worker) cannot be deleted; toggle the visibility checkbox to hide them. Custom roles can be edited or removed.</div>
         </div>
-        <button class="zaf-launch-close" id="roles-close">✕</button>
+        <button class="zaf-launch-close" id="roles-close" title="Close" aria-label="Close">✕</button>
       </div>
       <div class="zaf-launch-body" style="display:flex;flex-direction:column;gap:12px">
         <div id="roles-list" style="display:flex;flex-direction:column;gap:8px;max-height:42vh;overflow:auto;border:1px solid var(--border-subtle);border-radius:4px;padding:8px"></div>
@@ -5327,7 +5327,7 @@ function openOrgAgentPicker() {
           <div class="zaf-launch-title">Pick an agent</div>
           <div class="zaf-launch-sub">Add an existing agent to the org, or create a new one.</div>
         </div>
-        <button class="zaf-launch-close" id="org-picker-close" title="Close">✕</button>
+        <button class="zaf-launch-close" id="org-picker-close" title="Close" aria-label="Close">✕</button>
       </div>
       <div class="zaf-launch-body" style="display:flex;flex-direction:column;gap:10px">
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px">
