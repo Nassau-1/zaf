@@ -823,7 +823,7 @@ function extractFileRefsFromTicket(content) {
   return refs;
 }
 
-function updateDecorations(editor, context) {
+async function updateDecorations(editor, context) {
   if (!editor) return;
   ensureDecorationType(context);
 
@@ -832,17 +832,29 @@ function updateDecorations(editor, context) {
   if (!root) { editor.setDecorations(decorationType, []); return; }
 
   const activeDir = path.join(root, 'WIP', 'tickets', 'ACTIVE');
-  if (!fs.existsSync(activeDir)) { editor.setDecorations(decorationType, []); return; }
+  try {
+    await fs.promises.access(activeDir);
+  } catch {
+    editor.setDecorations(decorationType, []);
+    return;
+  }
 
-  const decorations = [];
+  let decorations = [];
 
   try {
-    const ticketFiles = fs.readdirSync(activeDir).filter(f => f.endsWith('.md'));
-    for (const tf of ticketFiles) {
+    const files = await fs.promises.readdir(activeDir);
+    const ticketFiles = files.filter(f => f.endsWith('.md'));
+
+    const fileResults = await Promise.all(ticketFiles.map(async tf => {
       const ticketPath = path.join(activeDir, tf);
       let content;
-      try { content = fs.readFileSync(ticketPath, 'utf8'); } catch { continue; }
+      try {
+        content = await fs.promises.readFile(ticketPath, 'utf8');
+      } catch {
+        return [];
+      }
 
+      const fileDecorations = [];
       const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
       let ticketId = path.basename(tf, '.md');
       let title = '';
@@ -873,9 +885,12 @@ function updateDecorations(editor, context) {
         hover.appendMarkdown(`- **ID**: \`${ticketId}\`\n`);
         hover.appendMarkdown(`- **Title**: ${title}\n`);
         hover.appendMarkdown(`\n[▶ Open Detail](command:zaf.openDetail?${encodeURIComponent(JSON.stringify(ticketId))})`);
-        decorations.push({ range, hoverMessage: hover });
+        fileDecorations.push({ range, hoverMessage: hover });
       }
-    }
+      return fileDecorations;
+    }));
+
+    decorations = fileResults.flat();
   } catch (err) {
     console.error('[ZAF] Gutter update error:', err);
   }
