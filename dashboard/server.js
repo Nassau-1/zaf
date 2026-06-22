@@ -1124,28 +1124,33 @@ const server = http.createServer(async (req, res) => {
     // Find repeated sub-sequences of length ≥3 appearing ≥2 times
     const candidates = [];
     for (let len = 5; len >= 3; len--) {
+      // ⚡ Bolt optimization: O(N) lookup instead of O(N²) nested iteration
+      const sigCounts = new Map();
+      const sigToSubseq = new Map();
+
+      // First pass: count sequence frequencies
       for (let i = 0; i <= events.length - len; i++) {
         const subseq = events.slice(i, i + len);
         const sig = subseq.map(e => e.kind + ':' + e.content.slice(0, 30)).join('|');
-        let count = 0;
-        for (let j = 0; j <= events.length - len; j++) {
-          const s2 = events.slice(j, j + len).map(e => e.kind + ':' + e.content.slice(0, 30)).join('|');
-          if (s2 === sig) count++;
-        }
-        if (count >= 2) {
-          if (!candidates.find(c => c.sig === sig)) {
-            const toolCalls = subseq.filter(e => e.kind === 'tool-call').map(e => e.content.replace(/^.*?(🛠️|\[TOOL CALL\]|Executing tool)\s*/i, '').slice(0, 40));
-            const firstDecision = subseq.find(e => e.kind === 'decision' || e.kind === 'response');
-            candidates.push({
-              sig,
-              name: toolCalls[0] ? toolCalls[0].replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40) : `pattern-${candidates.length + 1}`,
-              description: firstDecision?.content?.slice(0, 200) || 'Repeated workflow pattern',
-              steps: subseq.map((e, idx) => `${idx + 1}. ${e.kind}: ${e.content.slice(0, 60)}`),
-              tools: [...new Set(toolCalls)],
-              occurrences: count,
-              context: { ticketId: entry.meta.ticketId, role: entry.meta.role, harness: entry.meta.harness },
-            });
-          }
+        sigCounts.set(sig, (sigCounts.get(sig) || 0) + 1);
+        if (!sigToSubseq.has(sig)) sigToSubseq.set(sig, subseq);
+      }
+
+      // Second pass: add repeated sequences
+      for (const [sig, count] of sigCounts.entries()) {
+        if (count >= 2 && !candidates.find(c => c.sig === sig)) {
+          const subseq = sigToSubseq.get(sig);
+          const toolCalls = subseq.filter(e => e.kind === 'tool-call').map(e => e.content.replace(/^.*?(🛠️|\[TOOL CALL\]|Executing tool)\s*/i, '').slice(0, 40));
+          const firstDecision = subseq.find(e => e.kind === 'decision' || e.kind === 'response');
+          candidates.push({
+            sig,
+            name: toolCalls[0] ? toolCalls[0].replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 40) : `pattern-${candidates.length + 1}`,
+            description: firstDecision?.content?.slice(0, 200) || 'Repeated workflow pattern',
+            steps: subseq.map((e, idx) => `${idx + 1}. ${e.kind}: ${e.content.slice(0, 60)}`),
+            tools: [...new Set(toolCalls)],
+            occurrences: count,
+            context: { ticketId: entry.meta.ticketId, role: entry.meta.role, harness: entry.meta.harness },
+          });
         }
       }
     }
