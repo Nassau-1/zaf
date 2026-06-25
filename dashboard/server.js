@@ -481,6 +481,121 @@ Begin by stating (in one sentence) your understanding of this ticket and your fi
 
 const zoScript = path.join(__dirname, '..', 'cli', 'zo.js');
 
+function getAgentConfig(role, personalityInput) {
+  let personality = personalityInput || '';
+  let agentTools = [];
+  let toolsRegistry = [];
+  try {
+    const conf = readConfig();
+    if (!personality) personality = conf?.agents?.[role]?.personality || '';
+    agentTools = conf?.agents?.[role]?.tools || [];
+    toolsRegistry = conf?.toolsRegistry || [];
+  } catch {}
+  return { personality, agentTools, toolsRegistry };
+}
+
+function resolveAgentSeedText(opts, effectiveModelId, repoSlug, repoRoot, isRealCli, agentConfig) {
+  let seedText = '';
+  if (isRealCli) {
+    const ticketPath = path.join(repoRoot, 'WIP', 'tickets', 'ACTIVE', `${opts.ticketId}.md`);
+    let ticketBody = '';
+    try { ticketBody = fs.readFileSync(ticketPath, 'utf8'); } catch {}
+    const titleMatch = ticketBody.match(/^title:\s*(.+)$/m);
+    const ticketTitle = titleMatch ? titleMatch[1].trim() : opts.ticketId;
+    seedText = composeSeedPrompt({
+      ticketId: opts.ticketId, role: opts.role, modelId: effectiveModelId,
+      reasoning: opts.reasoning, heartbeat: opts.heartbeat,
+      promptAddendum: opts.promptAddendum, ticketTitle, repoName: repoSlug,
+      personality: agentConfig.personality, tools: agentConfig.agentTools,
+      toolsRegistry: agentConfig.toolsRegistry
+    }, ticketBody);
+  }
+  return seedText;
+}
+
+function resolvePtyCommand(opts, effectiveModelId, repoRoot) {
+  let ptyCmd, ptyArgs, ptyCwd;
+  if (opts.harness === 'mock' || opts.harness === 'zo') {
+    ptyCmd = 'cmd.exe';
+    const nodeArgs = [zoScript, 'run', opts.role, '--ticket', opts.ticketId, '--harness', opts.harness];
+    if (effectiveModelId) nodeArgs.push('--model', effectiveModelId);
+    if (opts.reasoning)        nodeArgs.push('--reasoning', opts.reasoning);
+    if (opts.heartbeat)        nodeArgs.push('--heartbeat', opts.heartbeat);
+    ptyArgs = ['/c', process.execPath, ...nodeArgs];
+    ptyCwd = path.resolve(__dirname, '..');
+  } else {
+    const cliMap = {
+      'claude-code': ['npx', '-y', '@anthropic-ai/claude-code'],
+      'claude':      ['npx', '-y', '@anthropic-ai/claude-code'],
+      'codex':       effectiveModelId
+                       ? ['npx', '-y', '@openai/codex', '--model', effectiveModelId]
+                       : ['npx', '-y', '@openai/codex'],
+      'gemini-cli':  ['npx', '-y', '@google/gemini-cli'],
+      'gemini':      ['npx', '-y', '@google/gemini-cli'],
+    };
+    const cliTokens = cliMap[opts.harness] || ['npx', '-y', '@anthropic-ai/claude-code'];
+    ptyCmd = 'cmd.exe';
+    ptyArgs = ['/c', ...cliTokens];
+    ptyCwd = repoRoot;
+  }
+  return { ptyCmd, ptyArgs, ptyCwd };
+}
+
+function updateAgentTelemetry(role, harness, durationSec, exitCode) {
+  try {
+    const conf = readConfig();
+    if (conf) {
+      conf.agentUsage = conf.agentUsage || {};
+      conf.agentUsage[role] = conf.agentUsage[role] || { runs: 0, secondsTotal: 0 };
+      conf.agentUsage[role].runs += 1;
+      conf.agentUsage[role].secondsTotal = parseFloat((conf.agentUsage[role].secondsTotal + durationSec).toFixed(3));
+      conf.agentUsage[role].lastRun = new Date().toISOString();
+      conf.agentUsage[role].harness = harness;
+      conf.harnessUsage = conf.harnessUsage || {};
+      conf.harnessUsage[harness] = conf.harnessUsage[harness] || { runs: 0, successes: 0 };
+      conf.harnessUsage[harness].runs += 1;
+      if (exitCode === 0) conf.harnessUsage[harness].successes += 1;
+      writeConfig(conf);
+    }
+  } catch {}
+}
+
+function handleAgentPtyDataLine(line, processId, meta, entry, ptyProc, ratePat, ticketId, role, harness) {
+  let auditKind = null;
+  if (/\[TOOL CALL\]|🛠️|Executing tool/i.test(line)) auditKind = 'agent.tool_call';
+  else if (/\[API REQUEST\]|🌐|HTTP request/i.test(line)) auditKind = 'agent.api_request';
+  else if (/\[DECISION\]|🧠|Decision|planning/i.test(line)) auditKind = 'agent.decision';
+  if (auditKind) auditAppend({ kind: auditKind, processId, ticketId, role, line: line.slice(0, 200) });
+
+  if (auditKind === 'agent.tool_call' && !entry.loopFired) {
+    entry.toolCallCount++;
+    const prefix = line.slice(0, 60);
+    entry.toolCallLog.push(prefix);
+    if (entry.toolCallLog.length > 20) entry.toolCallLog.shift();
+    const prefixCount = entry.toolCallLog.filter(p => p === prefix).length;
+    if (prefixCount >= 4 || entry.toolCallCount > 80) {
+      entry.loopFired = true;
+      const loopMsg = prefixCount >= 4
+        ? `Loop detected: same tool call repeated ${prefixCount}× in last 20 events — "${prefix.slice(0, 50)}"`
+        : `Loop detected: ${entry.toolCallCount} tool calls total (context exhaustion risk)`;
+      broadcast({ event: 'process.loop_warning', processId, msg: loopMsg, toolCallCount: entry.toolCallCount });
+      auditAppend({ kind: 'agent.loop', processId, ticketId, role, msg: loopMsg });
+      const conf = readConfig();
+      if (conf?.autoKillOnLoop) {
+        try { ptyProc.kill(); } catch {}
+        auditAppend({ kind: 'agent.loop-kill', processId, ticketId, role, msg: 'Auto-killed due to loop detection' });
+      }
+    }
+  }
+
+  if (ratePat && ratePat.test(line) && meta.status === 'running') {
+    meta.status = 'paused_rate_limit';
+    meta.pausedAt = Date.now();
+    auditAppend({ kind: 'process.limit_hit', processId, ticketId, harness, line: line.slice(0, 200) });
+    broadcast({ event: 'process.limit_hit', processId, meta });
+  }
+}
+
 function spawnAgent(opts) {
   const { ticketId, role, harness, modelId, model, reasoning, heartbeat, promptAddendum, repoId, isFleet } = opts;
   const effectiveModelId = modelId || model || '';
@@ -492,56 +607,9 @@ function spawnAgent(opts) {
   const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
   const isRealCli = PTY_REAL_HARNESSES.has(harness);
 
-  // Resolve personality + authorized tools from config if not supplied directly
-  let personality = opts.personality || '';
-  let agentTools = [];
-  let toolsRegistry = [];
-  try {
-    const conf = readConfig();
-    if (!personality) personality = conf?.agents?.[role]?.personality || '';
-    agentTools = conf?.agents?.[role]?.tools || [];
-    toolsRegistry = conf?.toolsRegistry || [];
-  } catch {}
-
-  // Compose seed for real CLIs
-  let seedText = '';
-  if (isRealCli) {
-    const ticketPath = path.join(repoRoot, 'WIP', 'tickets', 'ACTIVE', `${ticketId}.md`);
-    let ticketBody = '';
-    try { ticketBody = fs.readFileSync(ticketPath, 'utf8'); } catch {}
-    const titleMatch = ticketBody.match(/^title:\s*(.+)$/m);
-    const ticketTitle = titleMatch ? titleMatch[1].trim() : ticketId;
-    seedText = composeSeedPrompt({ ticketId, role, modelId: effectiveModelId, reasoning, heartbeat, promptAddendum, ticketTitle, repoName: repoSlug, personality, tools: agentTools, toolsRegistry }, ticketBody);
-  }
-
-  // Determine PTY command
-  // On Windows, node-pty needs either a full path or cmd.exe to resolve executables.
-  let ptyCmd, ptyArgs, ptyCwd;
-  if (harness === 'mock' || harness === 'zo') {
-    // Use cmd.exe to wrap node so PATH resolution works reliably on Windows
-    ptyCmd = 'cmd.exe';
-    const nodeArgs = [zoScript, 'run', role, '--ticket', ticketId, '--harness', harness];
-    if (effectiveModelId) nodeArgs.push('--model', effectiveModelId);
-    if (reasoning)        nodeArgs.push('--reasoning', reasoning);
-    if (heartbeat)        nodeArgs.push('--heartbeat', heartbeat);
-    ptyArgs = ['/c', process.execPath, ...nodeArgs];
-    ptyCwd = path.resolve(__dirname, '..');
-  } else {
-    // Real CLI — invoke via cmd.exe to resolve .cmd shims on Windows
-    const cliMap = {
-      'claude-code': ['npx', '-y', '@anthropic-ai/claude-code'],
-      'claude':      ['npx', '-y', '@anthropic-ai/claude-code'],
-      'codex':       effectiveModelId
-                       ? ['npx', '-y', '@openai/codex', '--model', effectiveModelId]
-                       : ['npx', '-y', '@openai/codex'],
-      'gemini-cli':  ['npx', '-y', '@google/gemini-cli'],
-      'gemini':      ['npx', '-y', '@google/gemini-cli'],
-    };
-    const cliTokens = cliMap[harness] || ['npx', '-y', '@anthropic-ai/claude-code'];
-    ptyCmd = 'cmd.exe';
-    ptyArgs = ['/c', ...cliTokens];
-    ptyCwd = repoRoot;
-  }
+  const agentConfig = getAgentConfig(role, opts.personality);
+  const seedText = resolveAgentSeedText(opts, effectiveModelId, repoSlug, repoRoot, isRealCli, agentConfig);
+  const { ptyCmd, ptyArgs, ptyCwd } = resolvePtyCommand(opts, effectiveModelId, repoRoot);
 
   const ptyEnv = {
     ...process.env,
@@ -604,44 +672,7 @@ function spawnAgent(opts) {
     lineAccum = textLines.pop();
     for (const line of textLines) {
       if (!line.trim()) continue;
-      // Classify for audit
-      let auditKind = null;
-      if (/\[TOOL CALL\]|🛠️|Executing tool/i.test(line)) auditKind = 'agent.tool_call';
-      else if (/\[API REQUEST\]|🌐|HTTP request/i.test(line)) auditKind = 'agent.api_request';
-      else if (/\[DECISION\]|🧠|Decision|planning/i.test(line)) auditKind = 'agent.decision';
-      if (auditKind) auditAppend({ kind: auditKind, processId, ticketId, role, line: line.slice(0, 200) });
-
-      // Loop detection (TKT-ZAF-0035)
-      if (auditKind === 'agent.tool_call' && !entry.loopFired) {
-        entry.toolCallCount++;
-        const prefix = line.slice(0, 60);
-        entry.toolCallLog.push(prefix);
-        if (entry.toolCallLog.length > 20) entry.toolCallLog.shift();
-        // Check: same prefix ≥4 times in rolling window OR total > 80
-        const prefixCount = entry.toolCallLog.filter(p => p === prefix).length;
-        if (prefixCount >= 4 || entry.toolCallCount > 80) {
-          entry.loopFired = true;
-          const loopMsg = prefixCount >= 4
-            ? `Loop detected: same tool call repeated ${prefixCount}× in last 20 events — "${prefix.slice(0, 50)}"`
-            : `Loop detected: ${entry.toolCallCount} tool calls total (context exhaustion risk)`;
-          broadcast({ event: 'process.loop_warning', processId, msg: loopMsg, toolCallCount: entry.toolCallCount });
-          auditAppend({ kind: 'agent.loop', processId, ticketId, role, msg: loopMsg });
-          // Auto-kill if configured
-          const conf = readConfig();
-          if (conf?.autoKillOnLoop) {
-            try { ptyProc.kill(); } catch {}
-            auditAppend({ kind: 'agent.loop-kill', processId, ticketId, role, msg: 'Auto-killed due to loop detection' });
-          }
-        }
-      }
-
-      // Rate-limit detection (TKT-ZAF-0015)
-      if (ratePat && ratePat.test(line) && meta.status === 'running') {
-        meta.status = 'paused_rate_limit';
-        meta.pausedAt = Date.now();
-        auditAppend({ kind: 'process.limit_hit', processId, ticketId, harness, line: line.slice(0, 200) });
-        broadcast({ event: 'process.limit_hit', processId, meta });
-      }
+      handleAgentPtyDataLine(line, processId, meta, entry, ptyProc, ratePat, ticketId, role, harness);
     }
   });
 
@@ -660,23 +691,7 @@ function spawnAgent(opts) {
     broadcast({ event: 'process.end', meta });
     auditAppend({ kind: 'process.end', processId, ticketId, role, exitCode, durationSec });
 
-    // Update agent usage telemetry (real data only)
-    try {
-      const conf = readConfig();
-      if (conf) {
-        conf.agentUsage = conf.agentUsage || {};
-        conf.agentUsage[role] = conf.agentUsage[role] || { runs: 0, secondsTotal: 0 };
-        conf.agentUsage[role].runs += 1;
-        conf.agentUsage[role].secondsTotal = parseFloat((conf.agentUsage[role].secondsTotal + durationSec).toFixed(3));
-        conf.agentUsage[role].lastRun = new Date().toISOString();
-        conf.agentUsage[role].harness = harness;
-        conf.harnessUsage = conf.harnessUsage || {};
-        conf.harnessUsage[harness] = conf.harnessUsage[harness] || { runs: 0, successes: 0 };
-        conf.harnessUsage[harness].runs += 1;
-        if (exitCode === 0) conf.harnessUsage[harness].successes += 1;
-        writeConfig(conf);
-      }
-    } catch {}
+    updateAgentTelemetry(role, harness, durationSec, exitCode);
     pushReload();
   });
 
