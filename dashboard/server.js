@@ -1137,16 +1137,26 @@ const server = http.createServer(async (req, res) => {
     // Find repeated sub-sequences of length ≥3 appearing ≥2 times
     const candidates = [];
     for (let len = 5; len >= 3; len--) {
+      const sigCounts = new Map();
+      const sigFirstIdx = new Map();
+
+      // Pass 1: O(N) frequency counting
       for (let i = 0; i <= events.length - len; i++) {
-        const subseq = events.slice(i, i + len);
-        const sig = subseq.map(e => e.kind + ':' + e.content.slice(0, 30)).join('|');
-        let count = 0;
-        for (let j = 0; j <= events.length - len; j++) {
-          const s2 = events.slice(j, j + len).map(e => e.kind + ':' + e.content.slice(0, 30)).join('|');
-          if (s2 === sig) count++;
+        let sig = '';
+        for (let k = 0; k < len; k++) {
+          const e = events[i + k];
+          sig += (k > 0 ? '|' : '') + e.kind + ':' + e.content.slice(0, 30);
         }
+        sigCounts.set(sig, (sigCounts.get(sig) || 0) + 1);
+        if (!sigFirstIdx.has(sig)) sigFirstIdx.set(sig, i);
+      }
+
+      // Pass 2: Process candidates
+      for (const [sig, count] of sigCounts.entries()) {
         if (count >= 2) {
           if (!candidates.find(c => c.sig === sig)) {
+            const i = sigFirstIdx.get(sig);
+            const subseq = events.slice(i, i + len);
             const toolCalls = subseq.filter(e => e.kind === 'tool-call').map(e => e.content.replace(/^.*?(🛠️|\[TOOL CALL\]|Executing tool)\s*/i, '').slice(0, 40));
             const firstDecision = subseq.find(e => e.kind === 'decision' || e.kind === 'response');
             candidates.push({
