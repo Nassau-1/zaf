@@ -5331,22 +5331,22 @@ function openOrgAgentPicker() {
       </div>
       <div class="zaf-launch-body" style="display:flex;flex-direction:column;gap:10px">
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:8px">
-          <input id="org-picker-q" placeholder="Search by name or key…" />
-          <select id="org-picker-cli">
+          <input id="org-picker-q" placeholder="Search by name or key…" aria-label="Search agents by name or key" />
+          <select id="org-picker-cli" aria-label="Filter by CLI">
             <option value="">All CLIs</option>
             ${harnesses.map(h => `<option value="${safeHTML(h)}">${safeHTML(h)}</option>`).join('')}
           </select>
-          <select id="org-picker-struct">
+          <select id="org-picker-struct" aria-label="Filter by role">
             <option value="">All roles</option>
             ${structRoles.map(r => `<option value="${safeHTML(r)}">${safeHTML(r)}</option>`).join('')}
           </select>
-          <select id="org-picker-source">
+          <select id="org-picker-source" aria-label="Filter by source">
             <option value="">Any source</option>
             <option value="local">Local (Builder)</option>
             <option value="imported">Imported (Marketplace)</option>
           </select>
         </div>
-        <select id="org-picker-team" style="margin-top:4px">
+        <select id="org-picker-team" style="margin-top:4px" aria-label="Filter by team">
           ${teams.map(t => `<option value="${safeHTML(t.id)}">${safeHTML(t.name)}</option>`).join('') || '<option value="">— no teams yet, will create Default —</option>'}
         </select>
         <div id="org-picker-list" style="max-height:46vh;overflow:auto;border:1px solid var(--border-subtle);border-radius:4px"></div>
