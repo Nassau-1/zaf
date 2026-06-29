@@ -11,3 +11,6 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+## 2024-06-25 - Efficient reading of large JSONL audit logs
+**Learning:** Reading a large append-only log file sequentially (via `fs.readFileSync` and `.split()`) inside a frequent API endpoint (`/api/audit`) creates an O(N) memory and CPU bottleneck, blocking the event loop.
+**Action:** When extracting the most recent `N` entries from a large log file, use `fs.openSync` and `fs.readSync` to read chunks backwards from the end of the file. This reduces the complexity to O(limit) and prevents event loop blocking.

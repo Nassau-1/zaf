@@ -285,9 +285,43 @@ function auditAppend(event) {
 function auditRead(limit = 500) {
   try {
     if (!fs.existsSync(AUDIT_FILE)) return [];
-    const data = fs.readFileSync(AUDIT_FILE, 'utf8');
-    const lines = data.trim().split(/\r?\n/).filter(Boolean);
-    return lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    const stats = fs.statSync(AUDIT_FILE);
+    // If file is small, read it all at once (fast path)
+    if (stats.size < 1024 * 1024) {
+      const data = fs.readFileSync(AUDIT_FILE, 'utf8');
+      const lines = data.trim().split(/\r?\n/).filter(Boolean);
+      return lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    }
+
+    // For large logs, read from the end backwards in chunks
+    const CHUNK_SIZE = 256 * 1024;
+    let fd;
+    try {
+      fd = fs.openSync(AUDIT_FILE, 'r');
+      const lines = [];
+      const buffer = Buffer.alloc(CHUNK_SIZE);
+      let position = stats.size;
+      let leftOver = '';
+
+      while (position > 0 && lines.length < limit) {
+        const length = Math.min(CHUNK_SIZE, position);
+        position -= length;
+        const bytesRead = fs.readSync(fd, buffer, 0, length, position);
+        const chunkStr = buffer.toString('utf8', 0, bytesRead);
+        const chunkLines = (chunkStr + leftOver).split(/\r?\n/);
+        leftOver = chunkLines.shift();
+
+        for (let i = chunkLines.length - 1; i >= 0 && lines.length < limit; i--) {
+          const trimmed = chunkLines[i].trim();
+          if (trimmed) lines.push(trimmed);
+        }
+      }
+
+      if (leftOver && lines.length < limit) lines.push(leftOver.trim());
+      return lines.reverse().map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+    }
   } catch { return []; }
 }
 
