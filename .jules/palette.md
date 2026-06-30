@@ -5,3 +5,7 @@
 ## 2024-06-03 - Modal Close Button Accessibility
 **Learning:** Icon-only modal close buttons lacked ARIA labels and focus-visible states, making them inaccessible for screen readers and keyboard users.
 **Action:** Always add aria-label="Close" and :focus-visible outlines to icon-only buttons to ensure they are fully accessible.
+
+## 2026-06-30 - Zoom Button Accessibility
+**Learning:** Icon-only zoom buttons lacked ARIA labels , impairing screen reader and keyboard navigation.
+**Action:** Always add `aria-label` attributes to icon-only buttons
