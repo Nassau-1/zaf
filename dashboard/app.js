@@ -412,10 +412,21 @@ function bindNav() {
   });
 }
 function bindRefresh() {
-  document.getElementById('btn-refresh').addEventListener('click', async () => {
-    await loadData();
-    await loadAudit();
-    renderView(STATE.currentView);
+  const btn = document.getElementById('btn-refresh');
+  btn.addEventListener('click', async () => {
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.setAttribute('aria-disabled', 'true');
+    btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:6px;border-top-color:currentColor;"></span> Refreshing...';
+    try {
+      await loadData();
+      await loadAudit();
+      renderView(STATE.currentView);
+    } finally {
+      btn.disabled = false;
+      btn.removeAttribute('aria-disabled');
+      btn.innerHTML = originalText;
+    }
   });
 }
 
