@@ -1136,6 +1136,8 @@ const server = http.createServer(async (req, res) => {
     }).filter(Boolean);
     // Find repeated sub-sequences of length ≥3 appearing ≥2 times
     const candidates = [];
+    // ⚡ Bolt: Maintain parallel Set for O(1) existence checks instead of Array.prototype.find()
+    const candidateSigs = new Set();
     for (let len = 5; len >= 3; len--) {
       const sigCounts = new Map();
       const sigFirstIdx = new Map();
@@ -1154,7 +1156,7 @@ const server = http.createServer(async (req, res) => {
       // Pass 2: Process candidates
       for (const [sig, count] of sigCounts.entries()) {
         if (count >= 2) {
-          if (!candidates.find(c => c.sig === sig)) {
+          if (!candidateSigs.has(sig)) {
             const i = sigFirstIdx.get(sig);
             const subseq = events.slice(i, i + len);
             const toolCalls = subseq.filter(e => e.kind === 'tool-call').map(e => e.content.replace(/^.*?(🛠️|\[TOOL CALL\]|Executing tool)\s*/i, '').slice(0, 40));
@@ -1168,6 +1170,7 @@ const server = http.createServer(async (req, res) => {
               occurrences: count,
               context: { ticketId: entry.meta.ticketId, role: entry.meta.role, harness: entry.meta.harness },
             });
+            candidateSigs.add(sig);
           }
         }
       }
