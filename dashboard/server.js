@@ -1665,7 +1665,10 @@ ${payload.description || 'Task context and description.'}
       // 2. Copy template files
       const templateRoot = path.join(__dirname, 'templates', 'new-repo');
       const tpl = templateName || 'minimal';
-      const srcDir = path.join(templateRoot, tpl);
+      const srcDir = path.resolve(templateRoot, tpl);
+      if (!srcDir.startsWith(templateRoot + path.sep) && srcDir !== templateRoot) {
+        return send(res, 400, { error: 'Invalid template name' });
+      }
       if (fs.existsSync(srcDir)) {
         copyDirRecursive(srcDir, localPath);
       } else {
@@ -1846,7 +1849,10 @@ ${payload.description || 'Task context and description.'}
       const tmpDir = path.join(tmpBase, slug);
       if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
       execFileSync('git', ['clone', '--depth', '1', url, tmpDir], { timeout: 30000 });
-      const scanRoot = subdir ? path.join(tmpDir, subdir) : tmpDir;
+      const scanRoot = subdir ? path.resolve(tmpDir, subdir) : tmpDir;
+      if (!scanRoot.startsWith(tmpDir + path.sep) && scanRoot !== tmpDir) {
+        return send(res, 400, { error: 'Invalid subdir path' });
+      }
       const agents = parseAgentPack(scanRoot, url);
       send(res, 200, { agents, count: agents.length, source: url });
     } catch (e) {
