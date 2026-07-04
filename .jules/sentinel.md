@@ -6,3 +6,8 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+
+## 2026-11-20 - Arbitrary File Access via Template and Subdir Path Traversal
+**Vulnerability:** Path traversal in `/api/repo/create` (`templateName`) and `/api/marketplace/preview` (`subdir`) allows arbitrary directory copying and information disclosure.
+**Learning:** Concatenating user input with base directories using `path.join` or `path.resolve` without boundary validation allows traversal out of the intended directory context.
+**Prevention:** Always validate that the resolved path starts with the intended base directory (using `startsWith(base + path.sep)`) and explicitly handle exact root directory matches separately.
