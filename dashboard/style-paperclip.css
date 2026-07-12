@@ -899,6 +899,7 @@
   font-size: 10px;
 }
 
+.zaf-btn:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: 2px; }
 .zaf-btn {
   background: var(--indigo-500);
   border: 1px solid var(--indigo-500);
