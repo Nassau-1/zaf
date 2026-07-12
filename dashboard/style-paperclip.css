@@ -922,6 +922,7 @@
 }
 .zaf-btn.secondary:hover { color: var(--text-primary); border-color: var(--indigo-500); }
 .zaf-btn.danger { background: var(--status-blocked); border-color: var(--status-blocked); }
+.zaf-btn:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: 2px; }
 
 /* Usage donut and project bars */
 .zaf-usage-donut {
