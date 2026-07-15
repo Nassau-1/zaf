@@ -2022,7 +2022,9 @@ ${payload.description || 'Task context and description.'}
   if (pathname === '/api/repo/skills' && req.method === 'GET') {
     const repoSlug = parsed.query.repo;
     if (!repoSlug) return send(res, 400, { error: 'repo required' });
-    const skillsDir = path.join(path.resolve(REPOS_ROOT, repoSlug), '.zaf-skills');
+    const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+    if (!repoRoot.startsWith(REPOS_ROOT + path.sep) && repoRoot !== REPOS_ROOT) return send(res, 403, { error: 'Invalid path' });
+    const skillsDir = path.join(repoRoot, '.zaf-skills');
     try {
       if (!fs.existsSync(skillsDir)) return send(res, 200, { skills: [] });
       const files = await fs.promises.readdir(skillsDir);
@@ -2080,6 +2082,7 @@ ${payload.description || 'Task context and description.'}
   if (pathname === '/api/repo/context') {
     const repoSlug = parsed.query.repo || 'zaf';
     const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+    if (!repoRoot.startsWith(REPOS_ROOT + path.sep) && repoRoot !== REPOS_ROOT) return send(res, 403, { error: 'Invalid path' });
     try {
       const ctx = generateRepoContext(repoRoot);
       send(res, 200, ctx);
@@ -2095,6 +2098,7 @@ ${payload.description || 'Task context and description.'}
       const payload = await readJsonBody(req);
       const repoSlug = payload.repo || 'zaf';
       const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+      if (!repoRoot.startsWith(REPOS_ROOT + path.sep) && repoRoot !== REPOS_ROOT) return send(res, 403, { error: 'Invalid path' });
       const ctx = generateRepoContext(repoRoot);
       const mdPath = path.join(repoRoot, 'CODEBASE.md');
       const content = `# Codebase Map — ${repoSlug}\n\nGenerated ${new Date().toISOString()}\n\n\`\`\`\n${ctx.contextBlock}\n\`\`\`\n`;
