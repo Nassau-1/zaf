@@ -11,3 +11,6 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+## 2024-06-25 - O(1) Set lookup over Array.prototype.find
+**Learning:** Using `Array.prototype.find()` on an expanding array within a nested loop introduces an O(N²) performance bottleneck, blocking the Node.js event loop on large data sets (like process log arrays).
+**Action:** Always maintain a parallel `Set` for O(1) uniqueness lookups instead of using `Array.prototype.find()` on expanding arrays when processing event sequences.
