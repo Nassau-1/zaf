@@ -2080,6 +2080,9 @@ ${payload.description || 'Task context and description.'}
   if (pathname === '/api/repo/context') {
     const repoSlug = parsed.query.repo || 'zaf';
     const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+    if (!repoRoot.startsWith(REPOS_ROOT + path.sep) && repoRoot !== REPOS_ROOT) {
+      return send(res, 400, { error: 'Invalid repository boundary' });
+    }
     try {
       const ctx = generateRepoContext(repoRoot);
       send(res, 200, ctx);
