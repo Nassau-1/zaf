@@ -6,3 +6,8 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+
+## 2025-03-01 - Add boundary checks for repo path resolution
+**Vulnerability:** Missing boundary logic when resolving user provided paths in API endpoints.
+**Learning:** Node.js path.resolve resolves parent directory segments, which can lead to unintended directory escapes if not explicitly verified against the base path.
+**Prevention:** Always verify that the resolved path starts with the intended base directory using `resolvedPath.startsWith(basePath + path.sep)`.
