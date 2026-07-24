@@ -2081,6 +2081,10 @@ ${payload.description || 'Task context and description.'}
     const repoSlug = parsed.query.repo || 'zaf';
     const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
     try {
+      // Security enhancement: ensure path remains within REPOS_ROOT bounds
+      if (repoRoot !== REPOS_ROOT && !repoRoot.startsWith(REPOS_ROOT + path.sep)) {
+        return send(res, 403, { error: 'Invalid repo path' });
+      }
       const ctx = generateRepoContext(repoRoot);
       send(res, 200, ctx);
     } catch (e) {
@@ -2095,6 +2099,10 @@ ${payload.description || 'Task context and description.'}
       const payload = await readJsonBody(req);
       const repoSlug = payload.repo || 'zaf';
       const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+      // Security enhancement: ensure path remains within REPOS_ROOT bounds
+      if (repoRoot !== REPOS_ROOT && !repoRoot.startsWith(REPOS_ROOT + path.sep)) {
+        return send(res, 403, { error: 'Invalid repo path' });
+      }
       const ctx = generateRepoContext(repoRoot);
       const mdPath = path.join(repoRoot, 'CODEBASE.md');
       const content = `# Codebase Map — ${repoSlug}\n\nGenerated ${new Date().toISOString()}\n\n\`\`\`\n${ctx.contextBlock}\n\`\`\`\n`;
