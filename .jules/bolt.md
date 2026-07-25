@@ -11,3 +11,6 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+## 2025-02-24 - O(N²) loop blocking API on large process logs
+**Learning:** The ZAF skill extraction endpoint in `dashboard/server.js` processes large log arrays. Using `Array.prototype.find()` on an expanding results array inside a nested loop results in O(N²) performance, which blocks the Node.js event loop and causes API timeouts for long-running agents.
+**Action:** Use a parallel `Set` to track unique signatures for O(1) lookups during sequence extraction instead of searching the result array.
