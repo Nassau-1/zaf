@@ -1,7 +1,7 @@
-## 2024-05-31 - Initial Setup
-**Learning:** Found no accessibility focus indicators in the dashboard buttons.
-**Action:** Always add focus-visible styles to interactive elements for better keyboard navigation.
+## 2024-05-14 - Keyboard Accessibility for ZAF Buttons
+**Learning:** Found that primary buttons with solid backgrounds `.zaf-btn` lack proper `:focus-visible` styles which hurts keyboard navigation accessibility.
+**Action:** Always include a `:focus-visible` outline to ensure buttons have a visual indicator when focused by keyboard users. Since the button uses a solid background, use a positive outline-offset so the focus ring is visible against the application background.
 
-## 2024-06-03 - Modal Close Button Accessibility
-**Learning:** Icon-only modal close buttons lacked ARIA labels and focus-visible states, making them inaccessible for screen readers and keyboard users.
-**Action:** Always add aria-label="Close" and :focus-visible outlines to icon-only buttons to ensure they are fully accessible.
+## 2024-07-28 - Appending Journal Entries Correctly
+**Learning:** Found that I overwrote the entire `.jules/palette.md` file using `>` instead of appending to it with `>>` when first exploring the codebase and drafting the journal entry. This destroys historical agent memory context.
+**Action:** Always use the append operator `>>` (or a programmatic append operation) when writing to journal files like `.jules/palette.md` so that previous insights are not lost.
