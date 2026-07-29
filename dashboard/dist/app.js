@@ -13,6 +13,15 @@
 // CONFIG
 // =========================================================================
 
+// Performance optimization: Debounce frequent events (e.g. search inputs) to prevent unnecessary re-renders.
+function debounce(func, wait) {
+  let timeout;
+  return function(...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
 const DATA_URL  = '/api/data';
 const WATCH_URL = '/api/watch';
 
@@ -856,7 +865,8 @@ function renderBoard(container) {
       <div class="board-columns">${columns}</div>
     </div>`;
 
-  container.querySelector('#board-search')?.addEventListener('input', e => { STATE.filters.search = e.target.value; renderBoard(container); });
+  // Performance optimization: debounce board search
+  container.querySelector('#board-search')?.addEventListener('input', debounce(e => { STATE.filters.search = e.target.value; renderBoard(container); }, 300));
   container.querySelector('#filter-ws')?.addEventListener('change', e => { STATE.filters.workstream = e.target.value; renderBoard(container); });
   container.querySelector('#filter-phase')?.addEventListener('change', e => { STATE.filters.phase = e.target.value; renderBoard(container); });
   container.querySelector('#filter-status')?.addEventListener('change', e => { STATE.filters.status = e.target.value; renderBoard(container); });
@@ -1519,7 +1529,8 @@ function renderArchive(container) {
     else STATE.archiveSort = { col:c, dir:'asc' };
     renderArchive(container);
   }));
-  container.querySelector('#archive-search').addEventListener('input', e => { STATE.filters.search = e.target.value; renderArchive(container); });
+  // Performance optimization: debounce archive search
+  container.querySelector('#archive-search').addEventListener('input', debounce(e => { STATE.filters.search = e.target.value; renderArchive(container); }, 300));
   container.querySelectorAll('.archive-row[data-id]').forEach(row => row.addEventListener('click', () => openDetailPanel(row.dataset.id)));
 }
 
@@ -5419,7 +5430,8 @@ function openOrgAgentPicker() {
     });
   };
 
-  qEl.addEventListener('input', renderList);
+  // Performance optimization: debounce org picker search
+  qEl.addEventListener('input', debounce(renderList, 300));
   cliEl.addEventListener('change', renderList);
   structEl.addEventListener('change', renderList);
   srcEl.addEventListener('change', renderList);
