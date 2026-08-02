@@ -915,6 +915,7 @@
   transition: filter var(--t-fast);
 }
 .zaf-btn:hover { filter: brightness(1.15); }
+.zaf-btn:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: 2px; }
 .zaf-btn.secondary {
   background: transparent;
   color: var(--text-secondary);
