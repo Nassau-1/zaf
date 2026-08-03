@@ -65,17 +65,17 @@ const fleetProcessIds = new Set();             // processIds spawned via fleet d
 const REPO_CONTEXT_CACHE = new Map(); // repoRoot -> { ts, contextBlock, graph }
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'target', 'coverage', '.turbo', 'out', '.cache']);
 
-function walkDir(dirPath, maxDepth, depth = 0) {
-  if (depth > maxDepth) return [];
-  let results = [];
+// Performance optimization: pass results array by reference to avoid concat allocations
+function walkDir(dirPath, maxDepth, depth = 0, results = []) {
+  if (depth > maxDepth) return results;
   let entries;
-  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return []; }
+  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return results; }
   for (const e of entries) {
     if (e.name.startsWith('.') && e.name !== '.zaf-skills') continue;
     if (IGNORE_DIRS.has(e.name)) continue;
     const full = path.join(dirPath, e.name);
     if (e.isDirectory()) {
-      results = results.concat(walkDir(full, maxDepth, depth + 1));
+      walkDir(full, maxDepth, depth + 1, results);
     } else if (e.isFile()) {
       results.push(full);
     }
@@ -85,45 +85,33 @@ function walkDir(dirPath, maxDepth, depth = 0) {
 
 const SRC_EXTS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java', '.rb', '.php']);
 
+// Performance optimization: consolidate regex to single pass with capture groups
 function extractSymbols(filePath, content) {
   const symbols = [];
   const ext = path.extname(filePath);
   if (['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'].includes(ext)) {
-    const patterns = [
-      /^export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)/gm,
-      /^export\s+(?:const|let|var)\s+(\w+)\s*=/gm,
-      /^export\s+class\s+(\w+)/gm,
-      /^(?:async\s+)?function\s+(\w+)\s*\(/gm,
-      /^class\s+(\w+)/gm,
-    ];
-    for (const re of patterns) {
-      for (const m of content.matchAll(re)) symbols.push(m[1]);
+    const pattern = /^(?:export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)|export\s+(?:const|let|var)\s+(\w+)\s*=|export\s+class\s+(\w+)|(?:async\s+)?function\s+(\w+)\s*\(|class\s+(\w+))/gm;
+    for (const m of content.matchAll(pattern)) {
+       symbols.push(m[1] || m[2] || m[3] || m[4] || m[5]);
     }
   } else if (ext === '.py') {
-    for (const m of content.matchAll(/^(?:async\s+)?def\s+(\w+)\s*\(/gm)) symbols.push(m[1]);
-    for (const m of content.matchAll(/^class\s+(\w+)/gm)) symbols.push(m[1]);
+    const pattern = /^(?:(?:async\s+)?def\s+(\w+)\s*\(|class\s+(\w+))/gm;
+    for (const m of content.matchAll(pattern)) {
+       symbols.push(m[1] || m[2]);
+    }
   }
   return [...new Set(symbols)].slice(0, 8);
 }
 
+// Performance optimization: consolidate import regex
 function extractImports(filePath, content) {
   const imports = [];
   const ext = path.extname(filePath);
   const dir = path.dirname(filePath);
   if (['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'].includes(ext)) {
-    const patterns = [
-      /^import\s+.+?\s+from\s+['"](\.[^'"]+)['"]/gm,
-      /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/gm,
-    ];
-    for (const re of patterns) {
-      for (const m of content.matchAll(re)) {
-        const rel = m[1];
-        const exts = ['', '.js', '.ts', '.jsx', '.tsx', '/index.js', '/index.ts'];
-        for (const x of exts) {
-          const resolved = path.resolve(dir, rel + x);
-          imports.push(resolved);
-        }
-      }
+    const pattern = /(?:^import\s+.+?\s+from\s+|require\s*\(\s*)['"](\.[^'"]+)['"]/gm;
+    for (const m of content.matchAll(pattern)) {
+      imports.push(path.resolve(dir, m[1]));
     }
   }
   return imports;
@@ -169,10 +157,11 @@ function generateRepoContext(repoRoot) {
     size: d.size,
     symbols: d.symbols,
   }));
+  // Performance optimization: defer extension resolution to graph building phase to avoid parsing overhead
   const graphEdges = [];
   for (const [rel, d] of Object.entries(fileData)) {
     for (const imp of d.imports) {
-      const exts = ['', '.js', '.ts', '.jsx', '.tsx'];
+      const exts = ['', '.js', '.ts', '.jsx', '.tsx', '/index.js', '/index.ts'];
       for (const x of exts) {
         const candidate = imp + x;
         if (fileSet.has(candidate)) {
