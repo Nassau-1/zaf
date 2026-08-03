@@ -59,6 +59,16 @@ const processes = new Map();                   // processId -> { proc, meta, buf
 let nextProcessId = 1;
 const fleetProcessIds = new Set();             // processIds spawned via fleet dispatch
 
+function safeResolveRepo(repoSlug) {
+  if (!repoSlug) return null;
+  let decodedSlug;
+  try { decodedSlug = decodeURIComponent(repoSlug); } catch (e) { return null; }
+  const resolvedPath = path.resolve(REPOS_ROOT, decodedSlug);
+  const rootStr = REPOS_ROOT.endsWith(path.sep) ? REPOS_ROOT : REPOS_ROOT + path.sep;
+  if (!resolvedPath.startsWith(rootStr) && resolvedPath !== REPOS_ROOT) return null;
+  return resolvedPath;
+}
+
 // ─── Repo context generator (TKT-ZAF-0025) ───────────────────────────────────
 // Pure FS + regex — no external binaries, no LSP. Cap at 4000 chars.
 
@@ -2079,7 +2089,8 @@ ${payload.description || 'Task context and description.'}
   // ── Repo context (codebase map for seed injection) ────────────────────────
   if (pathname === '/api/repo/context') {
     const repoSlug = parsed.query.repo || 'zaf';
-    const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+    const repoRoot = safeResolveRepo(repoSlug);
+    if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
     try {
       const ctx = generateRepoContext(repoRoot);
       send(res, 200, ctx);
