@@ -86,7 +86,8 @@ function walkDir(dirPath, maxDepth, depth = 0) {
 const SRC_EXTS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java', '.rb', '.php']);
 
 function extractSymbols(filePath, content) {
-  const symbols = [];
+  // Performance optimization: Use a Set and return early to prevent matching unnecessary symbols after 8 are found.
+  const symbols = new Set();
   const ext = path.extname(filePath);
   if (['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'].includes(ext)) {
     const patterns = [
@@ -97,13 +98,22 @@ function extractSymbols(filePath, content) {
       /^class\s+(\w+)/gm,
     ];
     for (const re of patterns) {
-      for (const m of content.matchAll(re)) symbols.push(m[1]);
+      for (const m of content.matchAll(re)) {
+        symbols.add(m[1]);
+        if (symbols.size >= 8) return Array.from(symbols);
+      }
     }
   } else if (ext === '.py') {
-    for (const m of content.matchAll(/^(?:async\s+)?def\s+(\w+)\s*\(/gm)) symbols.push(m[1]);
-    for (const m of content.matchAll(/^class\s+(\w+)/gm)) symbols.push(m[1]);
+    for (const m of content.matchAll(/^(?:async\s+)?def\s+(\w+)\s*\(/gm)) {
+      symbols.add(m[1]);
+      if (symbols.size >= 8) return Array.from(symbols);
+    }
+    for (const m of content.matchAll(/^class\s+(\w+)/gm)) {
+      symbols.add(m[1]);
+      if (symbols.size >= 8) return Array.from(symbols);
+    }
   }
-  return [...new Set(symbols)].slice(0, 8);
+  return Array.from(symbols);
 }
 
 function extractImports(filePath, content) {

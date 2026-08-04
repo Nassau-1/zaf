@@ -11,3 +11,6 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+## 2024-07-20 - Early return in regex parsing
+**Learning:** Using `matchAll` across an entire file content buffer and pushing all results into an array without a bound limits performance, especially on large files.
+**Action:** When a bounded number of results is needed (e.g. 8 symbols), use a `Set` to collect matches and return early to skip scanning the rest of the file and applying subsequent regex patterns.
