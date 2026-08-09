@@ -86,24 +86,25 @@ function walkDir(dirPath, maxDepth, depth = 0) {
 const SRC_EXTS = new Set(['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs', '.py', '.go', '.rs', '.java', '.rb', '.php']);
 
 function extractSymbols(filePath, content) {
-  const symbols = [];
+  // Performance optimization: Combine multiple regexes and break early once 8 symbols are found to avoid O(N * P) full-file scans.
+  const symbols = new Set();
   const ext = path.extname(filePath);
   if (['.js', '.ts', '.jsx', '.tsx', '.mjs', '.cjs'].includes(ext)) {
-    const patterns = [
-      /^export\s+(?:default\s+)?(?:async\s+)?function\s+(\w+)/gm,
-      /^export\s+(?:const|let|var)\s+(\w+)\s*=/gm,
-      /^export\s+class\s+(\w+)/gm,
-      /^(?:async\s+)?function\s+(\w+)\s*\(/gm,
-      /^class\s+(\w+)/gm,
-    ];
-    for (const re of patterns) {
-      for (const m of content.matchAll(re)) symbols.push(m[1]);
+    const re = /^(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+(\w+)|^(?:export\s+)?class\s+(\w+)|^export\s+(?:const|let|var)\s+(\w+)\s*=/gm;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      symbols.add(m[1] || m[2] || m[3]);
+      if (symbols.size >= 8) break;
     }
   } else if (ext === '.py') {
-    for (const m of content.matchAll(/^(?:async\s+)?def\s+(\w+)\s*\(/gm)) symbols.push(m[1]);
-    for (const m of content.matchAll(/^class\s+(\w+)/gm)) symbols.push(m[1]);
+    const re = /^(?:async\s+)?def\s+(\w+)\s*\(|^class\s+(\w+)/gm;
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      symbols.add(m[1] || m[2]);
+      if (symbols.size >= 8) break;
+    }
   }
-  return [...new Set(symbols)].slice(0, 8);
+  return [...symbols];
 }
 
 function extractImports(filePath, content) {
