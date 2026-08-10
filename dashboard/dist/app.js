@@ -850,7 +850,7 @@ function renderBoard(container) {
         <select class="filter-select" id="filter-phase">${phaseOptions}</select>
         <select class="filter-select" id="filter-status">${statusOptions}</select>
         <select class="filter-select" id="filter-priority">${prioOptions}</select>
-        ${hasFilters ? `<span class="filter-clear" id="filter-clear">✕ Clear filters</span>` : ''}
+        ${hasFilters ? `<button type="button" class="filter-clear" id="filter-clear">✕ Clear filters</button>` : ''}
         <div class="board-result-count">${tickets.length} of ${active.length} tickets</div>
       </div>
       <div class="board-columns">${columns}</div>
@@ -2338,7 +2338,7 @@ function renderConsoleTabs() {
         <span class="tab-meta">${dur}</span>
         ${meta.status === 'pre-fire' || meta.status === 'pre-fire-paused' ? `<span id="${prefireId}" class="tab-meta" style="color:#f59e0b">⏱ pre-fire</span>` : ''}
         ${loopFlag ? `<span class="tab-loop-badge" title="${safeHTML(loopFlag.msg)}">⟳ loop</span>` : ''}
-        <span class="tab-close" data-close="${meta.processId}" title="Remove from tabs">✕</span>
+        <button type="button" class="tab-close" data-close="${meta.processId}" title="Remove from tabs" aria-label="Close tab">✕</button>
       </div>`;
   }
 

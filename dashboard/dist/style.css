@@ -730,6 +730,13 @@ html, body {
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   transition: color var(--t-fast), background var(--t-fast);
+  background: transparent;
+  border: none;
+  font-family: inherit;
+}
+.filter-clear:focus-visible {
+  outline: 2px solid var(--indigo-500);
+  outline-offset: -2px;
 }
 .filter-clear:hover { color: var(--text-primary); background: var(--bg-card); }
 
