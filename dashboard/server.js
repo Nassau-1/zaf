@@ -274,6 +274,7 @@ function auditAppend(event) {
   try {
     const entry = { ts: new Date().toISOString(), ...event };
     fs.appendFileSync(AUDIT_FILE, JSON.stringify(entry) + '\n', 'utf8');
+    if (cachedAuditLog) cachedAuditLog.push(entry);
     broadcast({ event: 'audit', entry });
     return entry;
   } catch (e) {
@@ -282,12 +283,17 @@ function auditAppend(event) {
   }
 }
 
+let cachedAuditLog = null;
 function auditRead(limit = 500) {
   try {
-    if (!fs.existsSync(AUDIT_FILE)) return [];
-    const data = fs.readFileSync(AUDIT_FILE, 'utf8');
-    const lines = data.trim().split(/\r?\n/).filter(Boolean);
-    return lines.slice(-limit).map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    if (!cachedAuditLog) {
+      if (!fs.existsSync(AUDIT_FILE)) return [];
+      const data = fs.readFileSync(AUDIT_FILE, 'utf8');
+      const lines = data.trim().split(/\r?\n/).filter(Boolean);
+      // Performance optimization: Cache parsed audit log to avoid synchronous disk I/O on every read
+      cachedAuditLog = lines.map(l => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+    }
+    return cachedAuditLog.slice(-limit);
   } catch { return []; }
 }
 
