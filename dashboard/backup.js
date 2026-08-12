@@ -22,6 +22,15 @@ const path = require('path');
 
 const DASHBOARD_DIR = __dirname;
 const REPOS_ROOT = process.env.ZAF_REPOS_ROOT || path.resolve(DASHBOARD_DIR, '..', '..');
+
+function resolveSafeRepoDir(repoInput) {
+  if (!repoInput) return REPOS_ROOT;
+  const resolvedPath = path.resolve(REPOS_ROOT, repoInput);
+  const rootStr = REPOS_ROOT.endsWith(path.sep) ? REPOS_ROOT : REPOS_ROOT + path.sep;
+  if (!resolvedPath.startsWith(rootStr) && resolvedPath !== REPOS_ROOT) return null;
+  return resolvedPath;
+}
+
 const BACKUP_ROOT = process.env.ZAF_BACKUP_ROOT
   || path.resolve(DASHBOARD_DIR, '..', '..', '..', '02_Runtime', 'zaf-backups');
 
@@ -149,7 +158,8 @@ function restoreLatest() {
   if (fs.existsSync(reposSnap)) {
     for (const slug of fs.readdirSync(reposSnap)) {
       const wipSrc = path.join(reposSnap, slug, 'WIP');
-      const repoLocal = path.join(REPOS_ROOT, slug);
+      const repoLocal = resolveSafeRepoDir(slug);
+      if (!repoLocal) { report.restored.push(`skip ${slug} (invalid path)`); continue; }
       if (!fs.existsSync(repoLocal)) { report.restored.push(`skip ${slug} (repo not present locally)`); continue; }
       const wipDest = path.join(repoLocal, 'WIP');
       copyDirRecursive(wipSrc, wipDest);
