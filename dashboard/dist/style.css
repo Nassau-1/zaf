@@ -991,6 +991,7 @@ html, body {
 .detail-close:hover { background: var(--bg-card); color: var(--text-primary); }
 
 .btn:focus-visible,
+.btn-run-agent:focus-visible,
 .console-btn:focus-visible,
 .detail-close:focus-visible,
 .nav-item:focus-visible {

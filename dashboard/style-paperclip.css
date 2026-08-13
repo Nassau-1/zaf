@@ -1027,7 +1027,8 @@
   border-radius: 4px;
 }
 .zaf-launch-close:hover { color: var(--text-primary); }
-.zaf-launch-close:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
+.zaf-launch-close:focus-visible,
+.zaf-btn:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
 .zaf-launch-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
 .zaf-launch-footer {
   padding: 12px 20px; border-top: 1px solid var(--border-subtle);
