@@ -33,9 +33,10 @@ function readFile(filePath) {
 
 function listMdFiles(dir) {
   try {
-    return fs.readdirSync(dir)
-      .filter(f => f.endsWith('.md') && !f.startsWith('.'))
-      .map(f => path.join(dir, f));
+    // Performance optimization: Avoid separate fs.statSync calls by using withFileTypes
+    return fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => d.isFile() && d.name.endsWith('.md') && !d.name.startsWith('.'))
+      .map(d => path.join(dir, d.name));
   } catch { return []; }
 }
 
@@ -51,14 +52,14 @@ function ensureArray(val) {
 function discoverRepos() {
   const repos = [];
   let entries;
-  try { entries = fs.readdirSync(REPOS_ROOT); } catch { return repos; }
+  try { entries = fs.readdirSync(REPOS_ROOT, { withFileTypes: true }); } catch { return repos; }
 
-  for (const name of entries) {
-    const repoPath = path.join(REPOS_ROOT, name);
-    let stat;
-    try { stat = fs.statSync(repoPath); } catch { continue; }
-    if (!stat.isDirectory()) continue;
+  for (const dirent of entries) {
+    const name = dirent.name;
+    // Performance optimization: Avoid separate fs.statSync calls by using withFileTypes
+    if (!dirent.isDirectory()) continue;
     if (name.startsWith('.')) continue;
+    const repoPath = path.join(REPOS_ROOT, name);
 
     const ticketsIndexPath = path.join(repoPath, 'WIP', 'tickets', 'TICKETS.md');
     if (fs.existsSync(ticketsIndexPath)) {
