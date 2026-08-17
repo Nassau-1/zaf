@@ -6,3 +6,7 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+## 2026-06-25 - Path Traversal in Server Route Resolution
+**Vulnerability:** The ZAF control plane `server.js` suffers from path traversal because `path.resolve(REPOS_ROOT, repoSlug)` blindly accepts arbitrary inputs with `..` allowing traversal outside `REPOS_ROOT`.
+**Learning:** Resolving user input paths directly using `path.resolve` relative to a base directory does not enforce boundaries. An attacker can supply a path like `../../../../../etc` and escape the base directory completely.
+**Prevention:** Explicit boundary checking must be used. Either verify that `(repoSlug || '').includes('..') === false`, or enforce boundary checks using `resolvedPath.startsWith(REPOS_ROOT + path.sep)`.
