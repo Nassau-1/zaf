@@ -2379,7 +2379,7 @@ function renderConsoleTabs() {
         <div class="steer-row" data-steer-for="${meta.processId}" style="display:flex;gap:6px;padding:6px;border-top:1px solid #1a1a20;align-items:center;">
           <input type="text" class="steer-input" placeholder="Send input to agent…" style="flex:1;background:#111118;color:#e0e0e8;border:1px solid #2a2a35;border-radius:4px;padding:5px 8px;font-family:monospace;font-size:12px;" />
           <button class="steer-send zaf-btn secondary" style="padding:5px 10px;font-size:11px;" data-steer-pid="${meta.processId}">Send</button>
-          <button class="steer-ctrlc zaf-btn" style="padding:5px 8px;font-size:11px;background:#7c3aed;" title="Send Ctrl+C" data-int-pid="${meta.processId}">⌃C</button>
+          <button class="steer-ctrlc zaf-btn" style="padding:5px 8px;font-size:11px;background:#7c3aed;" title="Send Ctrl+C" aria-label="Send Ctrl+C" data-int-pid="${meta.processId}">⌃C</button>
           <button class="steer-terminate zaf-btn" style="padding:5px 8px;font-size:11px;background:#dc2626;" title="Terminate + log" data-term-pid="${meta.processId}">Terminate</button>
           <label style="font-size:11px;color:#666;display:flex;align-items:center;gap:4px;cursor:pointer;">
             <input type="checkbox" class="pause-prefire-chk" data-pause-pid="${meta.processId}" ${meta.status==='pre-fire-paused'?'checked':''} />Pause pre-fire
@@ -4945,10 +4945,10 @@ function renderOrg(container) {
           <button class="zaf-btn secondary" id="org-fit">Fit</button>
           <button class="zaf-btn secondary" id="org-save">Save Layout</button>
           <span style="flex:1"></span>
-          <button class="zaf-btn secondary" id="org-zoom-out" title="Zoom out">−</button>
+          <button class="zaf-btn secondary" id="org-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
           <span id="org-zoom-val" style="font-size:11px;color:var(--text-muted);min-width:46px;text-align:center;font-variant-numeric:tabular-nums">100%</span>
-          <button class="zaf-btn secondary" id="org-zoom-in" title="Zoom in">+</button>
-          <button class="zaf-btn secondary" id="org-zoom-reset" title="Reset to 100%">⟲</button>
+          <button class="zaf-btn secondary" id="org-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+          <button class="zaf-btn secondary" id="org-zoom-reset" title="Reset to 100%" aria-label="Reset zoom to 100%">⟲</button>
         </div>
         <svg class="zaf-org-canvas" id="org-canvas" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid meet"></svg>
         <div class="zaf-org-help">

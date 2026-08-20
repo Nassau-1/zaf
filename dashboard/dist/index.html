@@ -99,7 +99,7 @@
         <span>ZAF</span> › <span id="topbar-view-label">Overview</span>
       </div>
       <div class="topbar-actions">
-        <button class="btn btn-secondary topbar-console-btn" id="topbar-console-toggle" title="Toggle multi-console terminal">
+        <button class="btn btn-secondary topbar-console-btn" id="topbar-console-toggle" title="Toggle multi-console terminal" aria-label="Toggle multi-console terminal">
           <span class="console-pulse" id="console-pulse"></span>
           <span>Shells</span>
           <span class="topbar-shell-count" id="topbar-shell-count">0</span>
@@ -108,7 +108,7 @@
           <div class="sse-dot" id="sse-dot"></div>
           <span id="sse-label">Connecting…</span>
         </div>
-        <button class="btn btn-secondary" id="btn-refresh" title="Manually refresh data">↺ Refresh</button>
+        <button class="btn btn-secondary" id="btn-refresh" title="Manually refresh data" aria-label="Refresh data">↺ Refresh</button>
       </div>
     </div>
 
@@ -148,10 +148,10 @@
         <span class="console-panel-subtitle" id="console-panel-subtitle">— No active subshells</span>
       </div>
       <div class="console-panel-actions">
-        <button class="console-btn" id="console-jump-latest" title="Switch to most recent live process and scroll to bottom">↓ Latest</button>
+        <button class="console-btn" id="console-jump-latest" title="Switch to most recent live process and scroll to bottom" aria-label="Scroll to latest output">↓ Latest</button>
         <button class="console-btn" id="console-clear-terminated">Clear terminated</button>
-        <button class="console-btn" id="console-kill-active" title="Kill the focused running shell">⏻ Kill focused</button>
-        <button class="console-btn" id="console-panel-close">✕ Hide</button>
+        <button class="console-btn" id="console-kill-active" title="Kill the focused running shell" aria-label="Kill focused shell">⏻ Kill focused</button>
+        <button class="console-btn" id="console-panel-close" aria-label="Hide console panel">✕ Hide</button>
       </div>
     </div>
     <div class="console-tab-bar-wrap">
