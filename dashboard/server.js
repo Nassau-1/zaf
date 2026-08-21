@@ -25,6 +25,16 @@ const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 const PORT = parseInt(process.env.PORT || '4242', 10);
 const REPOS_ROOT = path.resolve(process.env.REPOS_ROOT || path.resolve(__dirname, '../../'));
 
+// ─── Utility: Safe Path Resolution ───────────────────────────────────────────
+function safeResolveRepo(slug) {
+  if (!slug) return null;
+  const resolved = path.resolve(REPOS_ROOT, slug);
+  const rootStr = REPOS_ROOT.endsWith(path.sep) ? REPOS_ROOT : REPOS_ROOT + path.sep;
+  if (!resolved.startsWith(rootStr) && resolved !== REPOS_ROOT) return null;
+  return resolved;
+}
+
+
 const STATIC_DIR = __dirname;
 const PARSE_SCRIPT = path.join(__dirname, 'parse.js');
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -405,7 +415,7 @@ function composeSeedPrompt(opts, ticketBody) {
   const { ticketId, role, modelId, model, reasoning, heartbeat, promptAddendum, ticketTitle, repoName, personality, tools, toolsRegistry } = opts;
   const effectiveModel = modelId || model || '(default for this CLI)';
   const personalitySection = personality ? `\n## Personality & Scope\n${personality}\n` : '';
-  const repoRoot = repoName ? path.resolve(REPOS_ROOT, repoName) : null;
+  const repoRoot = repoName ? safeResolveRepo(repoName) : null;
   const absTicketPath = repoRoot ? path.join(repoRoot, 'WIP', 'tickets', 'ACTIVE', `${ticketId}.md`).replace(/\\/g, '/') : null;
 
   // Authorized Tools (TKT-ZAF-0060) — enumerate the agent's permitted tool set.
@@ -422,29 +432,31 @@ function composeSeedPrompt(opts, ticketBody) {
   let codebaseSection = '';
   let skillsSection = '';
   if (repoName) {
-    const repoRoot = path.resolve(REPOS_ROOT, repoName);
-    const codebaseMdPath = path.join(repoRoot, 'CODEBASE.md');
-    try {
-      const md = fs.readFileSync(codebaseMdPath, 'utf8');
-      const snippet = md.slice(0, 3000);
-      codebaseSection = `\n## Codebase Map\n\n${snippet}${md.length > 3000 ? '\n…(truncated)' : ''}\n`;
-    } catch {}
-    // Inject .zaf-skills/*.zaf-skill.md (up to 3 most recent, TKT-ZAF-0036)
-    const skillsDir = path.join(repoRoot, '.zaf-skills');
-    try {
-      const skillFiles = fs.readdirSync(skillsDir)
-        .filter(f => f.endsWith('.zaf-skill.md'))
-        .map(f => ({ f, mtime: fs.statSync(path.join(skillsDir, f)).mtime }))
-        .sort((a, b) => b.mtime - a.mtime)
-        .slice(0, 3);
-      if (skillFiles.length) {
-        const blocks = skillFiles.map(({ f }) => {
-          const body = fs.readFileSync(path.join(skillsDir, f), 'utf8').slice(0, 800);
-          return `### ${f}\n${body}`;
-        });
-        skillsSection = `\n## Extracted Skills\n\n${blocks.join('\n\n---\n\n')}\n`;
-      }
-    } catch {}
+    const repoRoot = safeResolveRepo(repoName);
+    if (repoRoot) {
+      const codebaseMdPath = path.join(repoRoot, 'CODEBASE.md');
+      try {
+        const md = fs.readFileSync(codebaseMdPath, 'utf8');
+        const snippet = md.slice(0, 3000);
+        codebaseSection = `\n## Codebase Map\n\n${snippet}${md.length > 3000 ? '\n…(truncated)' : ''}\n`;
+      } catch {}
+      // Inject .zaf-skills/*.zaf-skill.md (up to 3 most recent, TKT-ZAF-0036)
+      const skillsDir = path.join(repoRoot, '.zaf-skills');
+      try {
+        const skillFiles = fs.readdirSync(skillsDir)
+          .filter(f => f.endsWith('.zaf-skill.md'))
+          .map(f => ({ f, mtime: fs.statSync(path.join(skillsDir, f)).mtime }))
+          .sort((a, b) => b.mtime - a.mtime)
+          .slice(0, 3);
+        if (skillFiles.length) {
+          const blocks = skillFiles.map(({ f }) => {
+            const body = fs.readFileSync(path.join(skillsDir, f), 'utf8').slice(0, 800);
+            return `### ${f}\n${body}`;
+          });
+          skillsSection = `\n## Extracted Skills\n\n${blocks.join('\n\n---\n\n')}\n`;
+        }
+      } catch {}
+    }
   }
 
   return `# ZAF Agent Run — ${ticketId}
@@ -489,7 +501,8 @@ function spawnAgent(opts) {
   const startTime = Date.now();
   const startISO = new Date(startTime).toISOString();
   const repoSlug = repoId || 'zaf';
-  const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+  const repoRoot = safeResolveRepo(repoSlug);
+  if (!repoRoot) throw new Error('Invalid repo ID/path');
   const isRealCli = PTY_REAL_HARNESSES.has(harness);
 
   // Resolve personality + authorized tools from config if not supplied directly
@@ -1181,8 +1194,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const { name, description, steps, tools, sourceProcess, sourceTicket, repoName } = await readJsonBody(req);
       if (!name) return send(res, 400, { error: 'name required' });
-      const repoRoot = path.resolve(REPOS_ROOT, repoName || '');
-      if (!fs.existsSync(repoRoot)) return send(res, 404, { error: 'repo not found' });
+      const repoRoot = safeResolveRepo(repoName || '');
+      if (!repoRoot || !fs.existsSync(repoRoot)) return send(res, 404, { error: 'repo not found' });
       const skillDir = path.join(repoRoot, '.zaf-skills');
       fs.mkdirSync(skillDir, { recursive: true });
       const safeName = name.replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 60);
@@ -2022,7 +2035,9 @@ ${payload.description || 'Task context and description.'}
   if (pathname === '/api/repo/skills' && req.method === 'GET') {
     const repoSlug = parsed.query.repo;
     if (!repoSlug) return send(res, 400, { error: 'repo required' });
-    const skillsDir = path.join(path.resolve(REPOS_ROOT, repoSlug), '.zaf-skills');
+    const resolvedRepo = safeResolveRepo(repoSlug);
+    if (!resolvedRepo) return send(res, 400, { error: 'Invalid repo path' });
+    const skillsDir = path.join(resolvedRepo, '.zaf-skills');
     try {
       if (!fs.existsSync(skillsDir)) return send(res, 200, { skills: [] });
       const files = await fs.promises.readdir(skillsDir);
@@ -2052,7 +2067,9 @@ ${payload.description || 'Task context and description.'}
       const { repo, filename, content } = await readJsonBody(req);
       if (!repo || !filename || !content) return send(res, 400, { error: 'repo, filename, content required' });
       if (!/^[\w-]+\.zaf-skill\.md$/.test(filename)) return send(res, 400, { error: 'invalid filename' });
-      const skillPath = path.join(path.resolve(REPOS_ROOT, repo), '.zaf-skills', filename);
+      const resolvedRepo = safeResolveRepo(repo);
+      if (!resolvedRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const skillPath = path.join(resolvedRepo, '.zaf-skills', filename);
       if (!fs.existsSync(skillPath)) return send(res, 404, { error: 'skill not found' });
       fs.writeFileSync(skillPath, content, 'utf8');
       auditAppend({ kind: 'skill.updated', repo, filename });
@@ -2067,7 +2084,9 @@ ${payload.description || 'Task context and description.'}
       const { repo, filename } = await readJsonBody(req);
       if (!repo || !filename) return send(res, 400, { error: 'repo and filename required' });
       if (!/^[\w-]+\.zaf-skill\.md$/.test(filename)) return send(res, 400, { error: 'invalid filename' });
-      const skillPath = path.join(path.resolve(REPOS_ROOT, repo), '.zaf-skills', filename);
+      const resolvedRepo = safeResolveRepo(repo);
+      if (!resolvedRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const skillPath = path.join(resolvedRepo, '.zaf-skills', filename);
       if (!fs.existsSync(skillPath)) return send(res, 404, { error: 'skill not found' });
       fs.unlinkSync(skillPath);
       auditAppend({ kind: 'skill.deleted', repo, filename });
@@ -2079,7 +2098,8 @@ ${payload.description || 'Task context and description.'}
   // ── Repo context (codebase map for seed injection) ────────────────────────
   if (pathname === '/api/repo/context') {
     const repoSlug = parsed.query.repo || 'zaf';
-    const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+    const repoRoot = safeResolveRepo(repoSlug);
+    if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
     try {
       const ctx = generateRepoContext(repoRoot);
       send(res, 200, ctx);
@@ -2094,7 +2114,8 @@ ${payload.description || 'Task context and description.'}
     try {
       const payload = await readJsonBody(req);
       const repoSlug = payload.repo || 'zaf';
-      const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+      const repoRoot = safeResolveRepo(repoSlug);
+      if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
       const ctx = generateRepoContext(repoRoot);
       const mdPath = path.join(repoRoot, 'CODEBASE.md');
       const content = `# Codebase Map — ${repoSlug}\n\nGenerated ${new Date().toISOString()}\n\n\`\`\`\n${ctx.contextBlock}\n\`\`\`\n`;
