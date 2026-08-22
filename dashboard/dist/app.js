@@ -1150,14 +1150,14 @@ function openLaunchPopover(ticket) {
 
       <div class="zaf-launch-body">
         <div class="zaf-field">
-          <label>Role / Agent</label>
+          <label for="zaf-launch-role">Role / Agent</label>
           <select id="zaf-launch-role">
             ${Object.keys(STATE.config?.agents || {}).map(k => `<option value="${k}" ${k===defaultRole?'selected':''}>${STATE.config.agents[k].roleName} (${k})</option>`).join('')}
           </select>
         </div>
 
         <div class="zaf-field">
-          <label>CLI / Harness — pick which command-line agent runs this ticket</label>
+          <label for="zaf-launch-harness">CLI / Harness — pick which command-line agent runs this ticket</label>
           <select id="zaf-launch-harness">
             ${HARNESS_OPTIONS.map(h => {
               const allowed = availableHarnesses.includes(h.id);
@@ -1168,7 +1168,7 @@ function openLaunchPopover(ticket) {
         </div>
 
         <div class="zaf-field">
-          <label>Model</label>
+          <label for="zaf-launch-model">Model</label>
           <select id="zaf-launch-model">
             ${(HARNESS_MODEL_IDS[a.harness || 'mock'] || []).map(m => `<option value="${m.id}" ${(a.modelId||'')===m.id?'selected':''}>${m.id} — ${m.label}</option>`).join('') || '<option value="">N/A</option>'}
           </select>
@@ -1176,19 +1176,19 @@ function openLaunchPopover(ticket) {
 
         <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
           <div class="zaf-field">
-            <label>Reasoning</label>
+            <label for="zaf-launch-reasoning">Reasoning</label>
             <select id="zaf-launch-reasoning">
               ${['high','medium','low'].map(r => `<option value="${r}" ${(a.reasoning||'medium')===r?'selected':''}>${r}</option>`).join('')}
             </select>
           </div>
           <div class="zaf-field">
-            <label><span>Heartbeat</span><span class="zaf-heartbeat-val" id="zaf-launch-hbval">${a.heartbeat || 40} seconds</span></label>
+            <label for="zaf-launch-hb"><span>Heartbeat</span><span class="zaf-heartbeat-val" id="zaf-launch-hbval">${a.heartbeat || 40} seconds</span></label>
             <input type="range" id="zaf-launch-hb" min="5" max="300" step="5" value="${a.heartbeat || 40}" />
           </div>
         </div>
 
         <div class="zaf-field">
-          <label>Per-ticket prompt addendum (optional)</label>
+          <label for="zaf-launch-prompt">Per-ticket prompt addendum (optional)</label>
           <textarea id="zaf-launch-prompt" rows="3" placeholder="Anything specific you want the agent to know before it starts on this ticket…"></textarea>
         </div>
       </div>
@@ -1635,17 +1635,17 @@ function openNewProgrammeModal() {
         <button class="zaf-launch-close" id="prog-modal-close" aria-label="Close">✕</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:12px;padding:16px 0">
-        <div class="zaf-field"><label>Programme ID (e.g. PROG-ZAF-002)</label>
+        <div class="zaf-field"><label for="prog-id">Programme ID (e.g. PROG-ZAF-002)</label>
           <input class="zaf-input" id="prog-id" type="text" placeholder="PROG-ZAF-002" /></div>
-        <div class="zaf-field"><label>Title</label>
+        <div class="zaf-field"><label for="prog-title">Title</label>
           <input class="zaf-input" id="prog-title" type="text" placeholder="Phase title" /></div>
-        <div class="zaf-field"><label>Description (optional)</label>
+        <div class="zaf-field"><label for="prog-desc">Description (optional)</label>
           <input class="zaf-input" id="prog-desc" type="text" placeholder="Short description" /></div>
-        <div class="zaf-field"><label>Phase label (e.g. P9)</label>
+        <div class="zaf-field"><label for="prog-phase">Phase label (e.g. P9)</label>
           <input class="zaf-input" id="prog-phase" type="text" placeholder="P9" /></div>
-        <div class="zaf-field"><label>Default Workstream</label>
+        <div class="zaf-field"><label for="prog-ws">Default Workstream</label>
           <input class="zaf-input" id="prog-ws" type="text" placeholder="WS-UX" /></div>
-        <div class="zaf-field"><label>Target Repo</label>
+        <div class="zaf-field"><label for="prog-repo">Target Repo</label>
           <select class="zaf-input" id="prog-repo">${repoOpts}</select></div>
       </div>
       <div style="display:flex;gap:8px;justify-content:flex-end;padding-top:8px">
@@ -1774,10 +1774,10 @@ function openNewRepoWizard() {
         <div class="wizard-step active">1 · Import</div>
         <div class="wizard-step">2 · Confirm</div>
       </div>
-      <div class="zaf-field"><label>Repo id (slug — must be unique)</label>
+      <div class="zaf-field"><label for="nr-imp-name">Repo id (slug — must be unique)</label>
         <input id="nr-imp-name" placeholder="my-existing-repo" value="${safeHTML(form.name)}" />
       </div>
-      <div class="zaf-field"><label>Display name</label>
+      <div class="zaf-field"><label for="nr-imp-display">Display name</label>
         <input id="nr-imp-display" placeholder="My Existing Repo" value="${safeHTML(form.displayName)}" />
       </div>
       <div class="zaf-field"><label>Source</label>
@@ -1787,13 +1787,13 @@ function openNewRepoWizard() {
         </div>
       </div>
       <div class="zaf-field" id="nr-imp-local-row" style="${form.importMode==='clone'?'display:none':''}">
-        <label>Local path to existing repo (must contain .git/)</label>
+        <label for="nr-imp-path">Local path to existing repo (must contain .git/)</label>
         <input id="nr-imp-path" placeholder="C:/Users/LENOVO/Workspace/01_Repos/some-repo" value="${safeHTML(form.localPath)}" />
       </div>
       <div class="zaf-field" id="nr-imp-remote-row" style="${form.importMode==='local'?'display:none':''}">
-        <label>Remote URL</label>
+        <label for="nr-imp-remote">Remote URL</label>
         <input id="nr-imp-remote" placeholder="https://github.com/org/repo.git" value="${safeHTML(form.remoteUrl)}" />
-        <label style="margin-top:8px">Clone into</label>
+        <label style="margin-top:8px" for="nr-imp-cloneto">Clone into</label>
         <input id="nr-imp-cloneto" placeholder="C:/Users/LENOVO/Workspace/01_Repos/&lt;repo-id&gt;" value="${safeHTML(form.cloneTo)}" />
       </div>
       <div style="font-size:11px;color:var(--text-muted);background:rgba(99,102,241,0.08);border-left:3px solid var(--indigo-500,#6366f1);padding:8px 10px;border-radius:4px;">
@@ -1853,19 +1853,19 @@ function openNewRepoWizard() {
         <div class="wizard-step active">1 · Repo Info</div>
         <div class="wizard-step">2 · Scaffold</div>
       </div>
-      <div class="zaf-field"><label>Repo name (slug)</label>
+      <div class="zaf-field"><label for="nr-name">Repo name (slug)</label>
         <input id="nr-name" placeholder="my-repo" value="${safeHTML(form.name)}" />
       </div>
-      <div class="zaf-field"><label>Display name</label>
+      <div class="zaf-field"><label for="nr-displayname">Display name</label>
         <input id="nr-displayname" placeholder="My Project" value="${safeHTML(form.displayName)}" />
       </div>
-      <div class="zaf-field"><label>Local path</label>
+      <div class="zaf-field"><label for="nr-path">Local path</label>
         <input id="nr-path" placeholder="Path will be set after you enter the name" value="${safeHTML(form.localPath)}" />
       </div>
-      <div class="zaf-field"><label>Description</label>
+      <div class="zaf-field"><label for="nr-desc">Description</label>
         <input id="nr-desc" placeholder="One-line description" value="${safeHTML(form.description)}" />
       </div>
-      <div class="zaf-field"><label>GitHub remote URL (optional)</label>
+      <div class="zaf-field"><label for="nr-remote">GitHub remote URL (optional)</label>
         <input id="nr-remote" placeholder="https://github.com/org/repo.git" value="${safeHTML(form.remoteUrl)}" />
       </div>
       <div class="zaf-field"><label>Scaffold mode</label>
@@ -1912,7 +1912,7 @@ function openNewRepoWizard() {
         <div class="wizard-step active">2 · Scaffold</div>
       </div>
       ${form.mode === 'manual' ? `
-        <div class="zaf-field"><label>Template</label>
+        <div class="zaf-field"><label for="nr-template">Template</label>
           <select id="nr-template">
             <option value="minimal" ${form.templateName==='minimal'?'selected':''}>Minimal (git init + CLAUDE.md stub)</option>
             <option value="zaf-standard" ${form.templateName==='zaf-standard'?'selected':''}>ZAF Standard (CLAUDE.md, CODEX.md, AGENTS.md + WIP/tickets/ structure)</option>
@@ -1920,17 +1920,17 @@ function openNewRepoWizard() {
         </div>
         <div style="font-size:11px;color:var(--text-muted)">Repo: <strong>${safeHTML(form.name)}</strong> · Path: <code style="font-size:10px">${safeHTML(form.localPath)}</code></div>
       ` : `
-        <div class="zaf-field"><label>Agent role</label>
+        <div class="zaf-field"><label for="nr-agent-role">Agent role</label>
           <select id="nr-agent-role">
             ${agentKeys.map(k => `<option value="${k}" ${k===form.agentRole?'selected':''}>${safeHTML(agents[k].roleName || k)} (${k})</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Harness</label>
+        <div class="zaf-field"><label for="nr-agent-harness">Harness</label>
           <select id="nr-agent-harness">
             ${harnesses.map(h => `<option value="${h}" ${h===form.agentHarness?'selected':''}>${displayHarness(h)}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Scaffold instructions</label>
+        <div class="zaf-field"><label for="nr-scaffold-instructions">Scaffold instructions</label>
           <textarea id="nr-scaffold-instructions" rows="4" placeholder="What should this repo do? The agent will receive this as its scaffolding brief.">${safeHTML(form.scaffoldInstructions)}</textarea>
         </div>
         <div style="font-size:11px;color:var(--text-muted)">Repo: <strong>${safeHTML(form.name)}</strong> · Path: <code style="font-size:10px">${safeHTML(form.localPath)}</code></div>
@@ -3459,17 +3459,17 @@ function renderControlTicketBuilder() {
     <div class="zaf-control-card" style="max-width:780px">
       <h2>Construct New Ticket Context</h2>
       <form id="zaf-ticket-form" style="display:grid; grid-template-columns:1fr 1fr; gap:14px;">
-        <div class="zaf-field" style="grid-column:1/3"><label>Target Repo</label>
+        <div class="zaf-field" style="grid-column:1/3"><label for="tkt-repo">Target Repo</label>
           <select id="tkt-repo">
             ${(STATE.data?.repos||[]).map(r => `<option value="${r.id}" ${r.id==='zaf'?'selected':''}>${r.id}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field" style="grid-column:1/3"><label>Title</label>
+        <div class="zaf-field" style="grid-column:1/3"><label for="tkt-title">Title</label>
           <input id="tkt-title" required placeholder="e.g. Wire OAuth callback validation" />
         </div>
-        <div class="zaf-field"><label>Phase Gate</label><select id="tkt-phase"></select></div>
-        <div class="zaf-field"><label>Workstream</label><select id="tkt-workstream"></select></div>
-        <div class="zaf-field"><label>Priority</label>
+        <div class="zaf-field"><label for="tkt-phase">Phase Gate</label><select id="tkt-phase"></select></div>
+        <div class="zaf-field"><label for="tkt-workstream">Workstream</label><select id="tkt-workstream"></select></div>
+        <div class="zaf-field"><label for="tkt-priority">Priority</label>
           <select id="tkt-priority">
             <option value="P0">P0 — Critical</option>
             <option value="P1">P1 — High</option>
@@ -3477,10 +3477,10 @@ function renderControlTicketBuilder() {
             <option value="P3">P3 — Low</option>
           </select>
         </div>
-        <div class="zaf-field"><label>Assigned Agent Role</label>
+        <div class="zaf-field"><label for="tkt-role">Assigned Agent Role</label>
           <select id="tkt-role">${Object.keys(STATE.config.agents).map(k => `<option value="${k}">${STATE.config.agents[k].roleName} (${k})</option>`).join('')}</select>
         </div>
-        <div class="zaf-field" style="grid-column:1/3"><label>Task Context & Description</label>
+        <div class="zaf-field" style="grid-column:1/3"><label for="tkt-description">Task Context & Description</label>
           <textarea id="tkt-description" rows="6" required placeholder="Describe the goal, background context, and acceptance criteria…"></textarea>
         </div>
         <div style="grid-column:1/3"><button type="submit" class="zaf-btn">Create Ticket & Auto-Index</button></div>
@@ -3584,14 +3584,14 @@ function renderControlAgentEditor() {
           </div>
         </div>
         <form id="zaf-agent-form" style="display:flex;flex-direction:column;gap:12px;">
-          <div class="zaf-field"><label>Role Name</label><input id="agent-name" value="${safeHTML(a.roleName)}" /></div>
+          <div class="zaf-field"><label for="agent-name">Role Name</label><input id="agent-name" value="${safeHTML(a.roleName)}" /></div>
 
           <div class="zaf-field">
-            <label>Personality &amp; Scope</label>
+            <label for="agent-personality">Personality &amp; Scope</label>
             <textarea id="agent-personality" rows="6" style="resize:vertical" placeholder="Describe who this agent is, how they approach problems, and what their operational boundaries are. This text is injected directly into every seed prompt.">${safeHTML(a.personality || '')}</textarea>
           </div>
 
-          <div class="zaf-field"><label>Default Harness</label>
+          <div class="zaf-field"><label for="agent-harness">Default Harness</label>
             <select id="agent-harness">
               ${getAllHarnessOptions().map(h => opt(h.id, harness, h.label)).join('')}
             </select>
@@ -3605,7 +3605,7 @@ function renderControlAgentEditor() {
           </div>
 
           <div class="zaf-field" id="agent-reasoning-field" style="${reasoningSupported ? '' : 'display:none'}">
-            <label>Reasoning Level</label>
+            <label for="agent-reasoning">Reasoning Level</label>
             <select id="agent-reasoning">
               ${reasoningValues.map(r => opt(r, a.reasoning || 'medium', r)).join('')}
             </select>
@@ -3622,7 +3622,7 @@ function renderControlAgentEditor() {
           </div>
           <div class="zaf-persona-preview" id="persona-preview"></div>
 
-          <div class="zaf-field"><label>Supervisor (N+1)</label>
+          <div class="zaf-field"><label for="agent-manager">Supervisor (N+1)</label>
             <select id="agent-manager">
               <option value="">None (reports to operator)</option>
               ${keys.filter(k => k !== key).map(k => `<option value="${k}" ${(a.manager||'')===k?'selected':''}>${agents[k].roleName} (${k})</option>`).join('')}
@@ -3697,9 +3697,9 @@ function renderControlAgentEditor() {
         </div>
         <form id="tool-form" style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
           <h2 style="margin-top:4px">Register Tool</h2>
-          <div class="zaf-field"><label>Tool ID</label><input id="new-tool-id" placeholder="e.g. DockerCompose" required /></div>
-          <div class="zaf-field"><label>Display Name</label><input id="new-tool-name" placeholder="Docker Compose orchestrator" required /></div>
-          <div class="zaf-field"><label>Capability description & bounds</label><textarea id="new-tool-desc" rows="3" required></textarea></div>
+          <div class="zaf-field"><label for="new-tool-id">Tool ID</label><input id="new-tool-id" placeholder="e.g. DockerCompose" required /></div>
+          <div class="zaf-field"><label for="new-tool-name">Display Name</label><input id="new-tool-name" placeholder="Docker Compose orchestrator" required /></div>
+          <div class="zaf-field"><label for="new-tool-desc">Capability description & bounds</label><textarea id="new-tool-desc" rows="3" required></textarea></div>
           <button type="submit" class="zaf-btn">Enroll Tool</button>
         </form>
       </div>
@@ -3954,27 +3954,27 @@ function renderControlMarketplace() {
       <h2 style="margin-bottom:6px">Import Defaults</h2>
       <p style="color:var(--text-secondary);font-size:12px;margin-bottom:14px">Applied to imported agents when the pack manifest does not specify a value. Pack-specified values still win.</p>
       <form id="mkt-defaults-form" style="display:grid;grid-template-columns:repeat(3, minmax(0,1fr));gap:12px;">
-        <div class="zaf-field"><label>Default CLI / Harness</label>
+        <div class="zaf-field"><label for="mkt-def-harness">Default CLI / Harness</label>
           <select id="mkt-def-harness">
             <option value="">— none —</option>
             ${harnessOpts.map(h => `<option value="${h.id}" ${md.harness===h.id?'selected':''}>${h.label}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Default Model ID</label>
+        <div class="zaf-field"><label for="mkt-def-model">Default Model ID</label>
           <input id="mkt-def-model" type="text" value="${safeHTML(md.modelId || '')}" placeholder="e.g. claude-sonnet-4-6" />
         </div>
-        <div class="zaf-field"><label>Default Reasoning</label>
+        <div class="zaf-field"><label for="mkt-def-reasoning">Default Reasoning</label>
           <select id="mkt-def-reasoning">
             ${['','low','medium','high'].map(v => `<option value="${v}" ${md.reasoning===v?'selected':''}>${v||'— none —'}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Default Structural Role</label>
+        <div class="zaf-field"><label for="mkt-def-struct">Default Structural Role</label>
           <select id="mkt-def-struct">
             <option value="">— none —</option>
             ${Object.entries(getStructuralPersonas()).map(([id,p]) => `<option value="${id}" ${md.structuralRole===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Default Heartbeat (s)</label>
+        <div class="zaf-field"><label for="mkt-def-heartbeat">Default Heartbeat (s)</label>
           <input id="mkt-def-heartbeat" type="number" min="5" max="300" step="5" value="${md.heartbeat || ''}" placeholder="40" />
         </div>
         <div style="grid-column:1/4;display:flex;gap:10px;align-items:center;">
@@ -4276,40 +4276,40 @@ function openAgentDetailFlyout(key, hostContainer) {
         <button class="zaf-launch-close" id="zaf-agent-flyout-close" title="Close" aria-label="Close">✕</button>
       </header>
       <form id="zaf-agent-flyout-form" style="display:flex;flex-direction:column;gap:12px;padding:16px 18px;overflow-y:auto;">
-        <div class="zaf-field"><label>Role Name</label>
+        <div class="zaf-field"><label for="fly-roleName">Role Name</label>
           <input id="fly-roleName" value="${safeHTML(a.roleName || '')}" />
         </div>
-        <div class="zaf-field"><label>System Prompt / Personality</label>
+        <div class="zaf-field"><label for="fly-personality">System Prompt / Personality</label>
           <textarea id="fly-personality" rows="6" style="resize:vertical">${safeHTML(a.personality || '')}</textarea>
         </div>
-        <div class="zaf-field"><label>CLI / Harness</label>
+        <div class="zaf-field"><label for="fly-harness">CLI / Harness</label>
           <select id="fly-harness">
             ${harnessOpts.map(h => `<option value="${h.id}" ${a.harness===h.id?'selected':''}>${h.label}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Model ID</label>
+        <div class="zaf-field"><label for="fly-modelId">Model ID</label>
           <input id="fly-modelId" value="${safeHTML(a.modelId || '')}" />
         </div>
-        <div class="zaf-field"><label>Reasoning</label>
+        <div class="zaf-field"><label for="fly-reasoning">Reasoning</label>
           <select id="fly-reasoning">
             ${reasoningVals.map(v => `<option value="${v}" ${a.reasoning===v?'selected':''}>${v}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Structural Role</label>
+        <div class="zaf-field"><label for="fly-structRole">Structural Role</label>
           <select id="fly-structRole">
             ${Object.entries(getStructuralPersonas()).map(([id,p]) => `<option value="${id}" ${(a.structuralRole||'worker')===id?'selected':''}>${p.icon} ${p.label}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>Heartbeat (seconds)</label>
+        <div class="zaf-field"><label for="fly-heartbeat">Heartbeat (seconds)</label>
           <input id="fly-heartbeat" type="number" min="5" max="300" step="5" value="${a.heartbeat || 40}" />
         </div>
-        <div class="zaf-field"><label>Org Team</label>
+        <div class="zaf-field"><label for="fly-team">Org Team</label>
           <select id="fly-team">
             <option value="">— unassigned —</option>
             ${teams.map(t => `<option value="${safeHTML(t.id)}" ${currentTeamId===t.id?'selected':''}>${safeHTML(t.name)}</option>`).join('')}
           </select>
         </div>
-        <div class="zaf-field"><label>N+1 Supervisor</label>
+        <div class="zaf-field"><label for="fly-manager">N+1 Supervisor</label>
           <select id="fly-manager">
             <option value="">None (reports to operator)</option>
             ${otherAgentKeys.map(k => `<option value="${safeHTML(k)}" ${(a.manager||'')===k?'selected':''}>${safeHTML(conf.agents[k].roleName || k)} (${safeHTML(k)})</option>`).join('')}
@@ -4668,27 +4668,27 @@ function renderControlCliHub() {
     <div class="zaf-control-card" style="margin-top:24px">
       <h2>Git Identity &amp; Remote</h2>
       <form id="zaf-github-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-        <div class="zaf-field"><label>Git Name</label>
+        <div class="zaf-field"><label for="gh-name">Git Name</label>
           <input id="gh-name" value="${safeHTML(github.name || '')}" placeholder="Nassau-1" />
         </div>
-        <div class="zaf-field"><label>Git Email</label>
+        <div class="zaf-field"><label for="gh-email">Git Email</label>
           <input id="gh-email" type="email" value="${safeHTML(github.email || '')}" placeholder="you@example.com" />
         </div>
-        <div class="zaf-field"><label>Default Remote</label>
+        <div class="zaf-field"><label for="gh-remote">Default Remote</label>
           <input id="gh-remote" value="${safeHTML(github.defaultRemote || 'origin')}" />
         </div>
-        <div class="zaf-field"><label>Auth Method</label>
+        <div class="zaf-field"><label for="gh-auth-method">Auth Method</label>
           <select id="gh-auth-method">
             <option value="ssh" ${github.authMethod === 'ssh' ? 'selected' : ''}>SSH Key</option>
             <option value="pat" ${github.authMethod === 'pat' ? 'selected' : ''}>Personal Access Token (PAT)</option>
           </select>
         </div>
         <div class="zaf-field" id="gh-ssh-row" style="${github.authMethod === 'pat' ? 'display:none' : ''}">
-          <label>SSH Key Path</label>
+          <label for="gh-ssh-path">SSH Key Path</label>
           <input id="gh-ssh-path" value="${safeHTML(github.sshKeyPath || '')}" placeholder="~/.ssh/id_ed25519" />
         </div>
         <div class="zaf-field" id="gh-pat-row" style="${github.authMethod !== 'pat' ? 'display:none' : ''}">
-          <label>Personal Access Token</label>
+          <label for="gh-pat">Personal Access Token</label>
           <input id="gh-pat" type="password" value="" placeholder="${github.pat ? '••••• (stored, enter new to replace)' : 'ghp_…'}" />
         </div>
         <div style="grid-column:1/3;display:flex;align-items:center;gap:12px;">
@@ -4715,11 +4715,11 @@ function renderControlCliHub() {
     <div class="zaf-control-card" style="margin-top:24px">
       <h2>Add Custom Harness</h2>
       <form id="zaf-custom-harness-form" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
-        <div class="zaf-field"><label>Display Name</label><input id="ch-name" required placeholder="My CLI" /></div>
-        <div class="zaf-field"><label>Version Check Command</label><input id="ch-version-cmd" required placeholder="mycli --version" /></div>
-        <div class="zaf-field" style="grid-column:1/3"><label>Install Command</label><input id="ch-install-cmd" placeholder="npm install -g mycli" /></div>
-        <div class="zaf-field" style="grid-column:1/3"><label>Auth Command (optional)</label><input id="ch-auth-cmd" placeholder="mycli auth login" /></div>
-        <div class="zaf-field" style="grid-column:1/3"><label>Default Model IDs (comma-separated)</label><input id="ch-model-ids" placeholder="gpt-4o, claude-sonnet-4-6" /></div>
+        <div class="zaf-field"><label for="ch-name">Display Name</label><input id="ch-name" required placeholder="My CLI" /></div>
+        <div class="zaf-field"><label for="ch-version-cmd">Version Check Command</label><input id="ch-version-cmd" required placeholder="mycli --version" /></div>
+        <div class="zaf-field" style="grid-column:1/3"><label for="ch-install-cmd">Install Command</label><input id="ch-install-cmd" placeholder="npm install -g mycli" /></div>
+        <div class="zaf-field" style="grid-column:1/3"><label for="ch-auth-cmd">Auth Command (optional)</label><input id="ch-auth-cmd" placeholder="mycli auth login" /></div>
+        <div class="zaf-field" style="grid-column:1/3"><label for="ch-model-ids">Default Model IDs (comma-separated)</label><input id="ch-model-ids" placeholder="gpt-4o, claude-sonnet-4-6" /></div>
         <div style="grid-column:1/3;display:flex;align-items:center;gap:12px;">
           <button type="submit" class="zaf-btn">Add Harness</button>
           <span id="ch-status" style="font-size:11px;color:var(--text-muted)"></span>
@@ -5458,9 +5458,9 @@ function renderOrgInspector() {
     if (!t) { el.innerHTML = '<div style="color:var(--text-muted);font-size:11px">Selection cleared.</div>'; return; }
     const teams = STATE.config.org.teams;
     el.innerHTML = `
-      <div class="meta-field"><label>Team ID</label><input value="${safeHTML(t.id)}" disabled /></div>
-      <div class="meta-field"><label>Display name</label><input id="team-name" value="${safeHTML(t.name)}" /></div>
-      <div class="meta-field"><label>Parent team</label>
+      <div class="meta-field"><label for="team-id-input">Team ID</label><input id="team-id-input" value="${safeHTML(t.id)}" disabled /></div>
+      <div class="meta-field"><label for="team-name">Display name</label><input id="team-name" value="${safeHTML(t.name)}" /></div>
+      <div class="meta-field"><label for="team-parent">Parent team</label>
         <select id="team-parent">
           <option value="">None (root)</option>
           ${teams.filter(x => x.id !== t.id).map(x => `<option value="${x.id}" ${t.parent===x.id?'selected':''}>${x.name}</option>`).join('')}
@@ -5494,17 +5494,17 @@ function renderOrgInspector() {
     const keys = Object.keys(STATE.config.agents);
     el.innerHTML = `
       <div style="font-size:10px;color:var(--text-muted)">Agent <strong style="color:var(--text-primary)">${k}</strong></div>
-      <div class="meta-field"><label>Role name</label><input id="ag-name" value="${safeHTML(a.roleName)}" /></div>
-      <div class="meta-field"><label>Structural role</label>
+      <div class="meta-field"><label for="ag-name">Role name</label><input id="ag-name" value="${safeHTML(a.roleName)}" /></div>
+      <div class="meta-field"><label for="ag-struct">Structural role</label>
         <select id="ag-struct">${Object.entries(getStructuralPersonas()).map(([id,p])=>`<option value="${id}" ${a.structuralRole===id?'selected':''}>${p.label}</option>`).join('')}</select>
       </div>
-      <div class="meta-field"><label>Supervisor (N+1)</label>
+      <div class="meta-field"><label for="ag-mgr">Supervisor (N+1)</label>
         <select id="ag-mgr">
           <option value="">None</option>
           ${keys.filter(x => x !== k).map(x => `<option value="${x}" ${a.manager===x?'selected':''}>${STATE.config.agents[x].roleName} (${x})</option>`).join('')}
         </select>
       </div>
-      <div class="meta-field"><label>Team membership</label>
+      <div class="meta-field"><label for="ag-team">Team membership</label>
         <select id="ag-team">
           ${teams.map(t => `<option value="${t.id}" ${(t.members||[]).includes(k)?'selected':''}>${t.name}</option>`).join('')}
         </select>
