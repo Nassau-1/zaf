@@ -11,3 +11,6 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+## 2024-06-26 - O(N²) Array Allocations in Recursive Traversal
+**Learning:** Using `results.concat()` at each level of a recursive directory traversal creates unnecessary array allocations that scale quadratically (O(N²)) in time and space complexity, leading to severe memory pressure and GC pauses on large directory structures.
+**Action:** When writing or optimizing recursive directory traversals, always pass a results array by reference (e.g., `results = []` as an argument) and push items into it rather than returning and concatenating new arrays.
