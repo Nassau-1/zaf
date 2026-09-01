@@ -216,8 +216,13 @@
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
 }
 .console-tab .tab-close:hover { color: var(--status-blocked); background: rgba(239,68,68,0.1); }
+.console-tab .tab-close:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
 
 .console-bodies {
   flex: 1;
@@ -915,6 +920,7 @@
   transition: filter var(--t-fast);
 }
 .zaf-btn:hover { filter: brightness(1.15); }
+.zaf-btn:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: 2px; }
 .zaf-btn.secondary {
   background: transparent;
   color: var(--text-secondary);
