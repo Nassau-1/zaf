@@ -26,6 +26,17 @@ const PORT = parseInt(process.env.PORT || '4242', 10);
 const REPOS_ROOT = path.resolve(process.env.REPOS_ROOT || path.resolve(__dirname, '../../'));
 
 const STATIC_DIR = __dirname;
+// Security Enhancement: Safely resolve paths to prevent path traversal
+function getSafeRepoRoot(repoSlug) {
+  if (!repoSlug) return null;
+  // Prevent directory traversal attacks by validating the resolved path
+  const resolved = path.resolve(REPOS_ROOT, repoSlug);
+  const rootStr = REPOS_ROOT.endsWith(path.sep) ? REPOS_ROOT : REPOS_ROOT + path.sep;
+  if (!resolved.startsWith(rootStr) && resolved !== REPOS_ROOT) return null;
+  return resolved;
+}
+
+
 const PARSE_SCRIPT = path.join(__dirname, 'parse.js');
 const DATA_FILE = path.join(__dirname, 'data.json');
 const CONFIG_FILE = path.join(__dirname, 'config.json');
@@ -405,7 +416,7 @@ function composeSeedPrompt(opts, ticketBody) {
   const { ticketId, role, modelId, model, reasoning, heartbeat, promptAddendum, ticketTitle, repoName, personality, tools, toolsRegistry } = opts;
   const effectiveModel = modelId || model || '(default for this CLI)';
   const personalitySection = personality ? `\n## Personality & Scope\n${personality}\n` : '';
-  const repoRoot = repoName ? path.resolve(REPOS_ROOT, repoName) : null;
+  const repoRoot = repoName ? getSafeRepoRoot(repoName) : null;
   const absTicketPath = repoRoot ? path.join(repoRoot, 'WIP', 'tickets', 'ACTIVE', `${ticketId}.md`).replace(/\\/g, '/') : null;
 
   // Authorized Tools (TKT-ZAF-0060) — enumerate the agent's permitted tool set.
@@ -422,7 +433,8 @@ function composeSeedPrompt(opts, ticketBody) {
   let codebaseSection = '';
   let skillsSection = '';
   if (repoName) {
-    const repoRoot = path.resolve(REPOS_ROOT, repoName);
+    const repoRoot = getSafeRepoRoot(repoName);
+    if (!repoRoot) return '';
     const codebaseMdPath = path.join(repoRoot, 'CODEBASE.md');
     try {
       const md = fs.readFileSync(codebaseMdPath, 'utf8');
@@ -489,7 +501,8 @@ function spawnAgent(opts) {
   const startTime = Date.now();
   const startISO = new Date(startTime).toISOString();
   const repoSlug = repoId || 'zaf';
-  const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+  const repoRoot = getSafeRepoRoot(repoSlug);
+  if (!repoRoot) return { processId: null, message: 'Invalid repo path' };
   const isRealCli = PTY_REAL_HARNESSES.has(harness);
 
   // Resolve personality + authorized tools from config if not supplied directly
@@ -1091,6 +1104,7 @@ const server = http.createServer(async (req, res) => {
         repoId:         payload.repo           || '',
         promptAddendum: payload.promptAddendum || '',
       });
+      if (!meta.processId) return send(res, 400, { error: meta.message || 'spawn failed' });
       send(res, 200, { status: 'spawned', processId: meta.processId, meta });
     };
     launch();
@@ -1181,7 +1195,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const { name, description, steps, tools, sourceProcess, sourceTicket, repoName } = await readJsonBody(req);
       if (!name) return send(res, 400, { error: 'name required' });
-      const repoRoot = path.resolve(REPOS_ROOT, repoName || '');
+      const repoRoot = getSafeRepoRoot(repoName || '');
+      if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
       if (!fs.existsSync(repoRoot)) return send(res, 404, { error: 'repo not found' });
       const skillDir = path.join(repoRoot, '.zaf-skills');
       fs.mkdirSync(skillDir, { recursive: true });
@@ -1262,7 +1277,9 @@ const server = http.createServer(async (req, res) => {
       if (entry.prefireTimer) { clearTimeout(entry.prefireTimer); entry.prefireTimer = null; }
       // Append termination note to ticket Handoff Log
       const today = new Date().toISOString().slice(0, 10);
-      const ticketPath = path.join(REPOS_ROOT, entry.meta.repoId || 'zaf', 'WIP', 'tickets', 'ACTIVE', `${entry.meta.ticketId}.md`);
+      const safeRepo = getSafeRepoRoot(entry.meta.repoId || 'zaf');
+      if (!safeRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const ticketPath = path.join(safeRepo, 'WIP', 'tickets', 'ACTIVE', `${entry.meta.ticketId}.md`);
       try {
         let content = fs.readFileSync(ticketPath, 'utf8');
         const logEntry = `\n- ${today} | operator | TERMINATED — killed mid-run from ZAF control plane.`;
@@ -1318,7 +1335,9 @@ const server = http.createServer(async (req, res) => {
       const { status: newStatus, repo } = payload;
       if (!newStatus) return send(res, 400, { error: 'status required' });
       const repoSlug = repo || 'zaf';
-      const activeDir = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ACTIVE');
+      const safeRepo = getSafeRepoRoot(repoSlug);
+      if (!safeRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const activeDir = path.join(safeRepo, 'WIP', 'tickets', 'ACTIVE');
       const ticketPath = path.join(activeDir, `${ticketId}.md`);
       if (!fs.existsSync(ticketPath)) return send(res, 404, { error: 'ticket not found in ACTIVE/' });
       let content = fs.readFileSync(ticketPath, 'utf8');
@@ -1329,7 +1348,7 @@ const server = http.createServer(async (req, res) => {
       content = content + logEntry;
       fs.writeFileSync(ticketPath, content, 'utf8');
       // Update TICKETS.md index row
-      const indexFile = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'TICKETS.md');
+      const indexFile = path.join(safeRepo, 'WIP', 'tickets', 'TICKETS.md');
       updateTicketsIndexRow(indexFile, ticketId, newStatus, today);
       runParse();
       pushReload();
@@ -1345,8 +1364,10 @@ const server = http.createServer(async (req, res) => {
       const ticketId = ticketArchiveMatch[1];
       const payload = await readJsonBody(req);
       const repoSlug = payload.repo || 'zaf';
-      const activeDir  = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ACTIVE');
-      const archivedDir = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ARCHIVED');
+      const safeRepo = getSafeRepoRoot(repoSlug);
+      if (!safeRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const activeDir = path.join(safeRepo, 'WIP', 'tickets', 'ACTIVE');
+      const archivedDir = path.join(safeRepo, 'WIP', 'tickets', 'ARCHIVED');
       const ticketPath = path.join(activeDir, `${ticketId}.md`);
       if (!fs.existsSync(ticketPath)) return send(res, 404, { error: 'ticket not found in ACTIVE/' });
       if (!fs.existsSync(archivedDir)) fs.mkdirSync(archivedDir, { recursive: true });
@@ -1359,7 +1380,7 @@ const server = http.createServer(async (req, res) => {
       content = content + `\n- ${today} | operator | Archived via Control Plane.`;
       fs.writeFileSync(path.join(archivedDir, `${ticketId}.md`), content, 'utf8');
       fs.unlinkSync(ticketPath);
-      const indexFile = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'TICKETS.md');
+      const indexFile = path.join(safeRepo, 'WIP', 'tickets', 'TICKETS.md');
       updateTicketsIndexRow(indexFile, ticketId, 'DONE', today);
       runParse();
       pushReload();
@@ -1375,8 +1396,10 @@ const server = http.createServer(async (req, res) => {
       const ticketId = ticketVoidMatch[1];
       const payload = await readJsonBody(req);
       const repoSlug = payload.repo || 'zaf';
-      const activeDir  = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ACTIVE');
-      const archivedDir = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ARCHIVED');
+      const safeRepo = getSafeRepoRoot(repoSlug);
+      if (!safeRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const activeDir = path.join(safeRepo, 'WIP', 'tickets', 'ACTIVE');
+      const archivedDir = path.join(safeRepo, 'WIP', 'tickets', 'ARCHIVED');
       const ticketPath = path.join(activeDir, `${ticketId}.md`);
       if (!fs.existsSync(ticketPath)) return send(res, 404, { error: 'ticket not found in ACTIVE/' });
       if (!fs.existsSync(archivedDir)) fs.mkdirSync(archivedDir, { recursive: true });
@@ -1387,7 +1410,7 @@ const server = http.createServer(async (req, res) => {
       content = content + `\n- ${today} | operator | VOIDED — operator decision via Control Plane.`;
       fs.writeFileSync(path.join(archivedDir, `${ticketId}.md`), content, 'utf8');
       fs.unlinkSync(ticketPath);
-      const indexFile = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'TICKETS.md');
+      const indexFile = path.join(safeRepo, 'WIP', 'tickets', 'TICKETS.md');
       updateTicketsIndexRow(indexFile, ticketId, 'VOIDED', today);
       runParse();
       pushReload();
@@ -1402,7 +1425,9 @@ const server = http.createServer(async (req, res) => {
       const payload = await readJsonBody(req);
       if (!payload.title) return send(res, 400, { error: 'title required' });
       const repoSlug = payload.repo || 'zaf';
-      const indexFile = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'TICKETS.md');
+      const safeRepo = getSafeRepoRoot(repoSlug);
+      if (!safeRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const indexFile = path.join(safeRepo, 'WIP', 'tickets', 'TICKETS.md');
       if (!fs.existsSync(indexFile)) return send(res, 404, { error: 'TICKETS.md not found' });
       const phaseLabel = payload.phase || 'P-NEW';
       const progId = payload.programmeId || `PROG-${Date.now()}`;
@@ -1454,9 +1479,11 @@ const server = http.createServer(async (req, res) => {
       const payload = await readJsonBody(req);
       if (!payload.title) return send(res, 400, { error: 'Missing title' });
       const repoSlug = payload.repo || 'zaf';
-      const activeDir = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ACTIVE');
-      const archivedDir = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'ARCHIVED');
-      const indexFile = path.join(REPOS_ROOT, repoSlug, 'WIP', 'tickets', 'TICKETS.md');
+      const safeRepo = getSafeRepoRoot(repoSlug);
+      if (!safeRepo) return send(res, 400, { error: 'Invalid repo path' });
+      const activeDir = path.join(safeRepo, 'WIP', 'tickets', 'ACTIVE');
+      const archivedDir = path.join(safeRepo, 'WIP', 'tickets', 'ARCHIVED');
+      const indexFile = path.join(safeRepo, 'WIP', 'tickets', 'TICKETS.md');
       if (!fs.existsSync(activeDir)) fs.mkdirSync(activeDir, { recursive: true });
 
       const allFiles = []
@@ -2022,7 +2049,9 @@ ${payload.description || 'Task context and description.'}
   if (pathname === '/api/repo/skills' && req.method === 'GET') {
     const repoSlug = parsed.query.repo;
     if (!repoSlug) return send(res, 400, { error: 'repo required' });
-    const skillsDir = path.join(path.resolve(REPOS_ROOT, repoSlug), '.zaf-skills');
+    const repoRoot = getSafeRepoRoot(repoSlug);
+    if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
+    const skillsDir = path.join(repoRoot, '.zaf-skills');
     try {
       if (!fs.existsSync(skillsDir)) return send(res, 200, { skills: [] });
       const files = await fs.promises.readdir(skillsDir);
@@ -2052,7 +2081,9 @@ ${payload.description || 'Task context and description.'}
       const { repo, filename, content } = await readJsonBody(req);
       if (!repo || !filename || !content) return send(res, 400, { error: 'repo, filename, content required' });
       if (!/^[\w-]+\.zaf-skill\.md$/.test(filename)) return send(res, 400, { error: 'invalid filename' });
-      const skillPath = path.join(path.resolve(REPOS_ROOT, repo), '.zaf-skills', filename);
+      const repoRoot = getSafeRepoRoot(repo);
+      if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
+      const skillPath = path.join(repoRoot, '.zaf-skills', filename);
       if (!fs.existsSync(skillPath)) return send(res, 404, { error: 'skill not found' });
       fs.writeFileSync(skillPath, content, 'utf8');
       auditAppend({ kind: 'skill.updated', repo, filename });
@@ -2067,7 +2098,9 @@ ${payload.description || 'Task context and description.'}
       const { repo, filename } = await readJsonBody(req);
       if (!repo || !filename) return send(res, 400, { error: 'repo and filename required' });
       if (!/^[\w-]+\.zaf-skill\.md$/.test(filename)) return send(res, 400, { error: 'invalid filename' });
-      const skillPath = path.join(path.resolve(REPOS_ROOT, repo), '.zaf-skills', filename);
+      const repoRoot = getSafeRepoRoot(repo);
+      if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
+      const skillPath = path.join(repoRoot, '.zaf-skills', filename);
       if (!fs.existsSync(skillPath)) return send(res, 404, { error: 'skill not found' });
       fs.unlinkSync(skillPath);
       auditAppend({ kind: 'skill.deleted', repo, filename });
@@ -2079,7 +2112,8 @@ ${payload.description || 'Task context and description.'}
   // ── Repo context (codebase map for seed injection) ────────────────────────
   if (pathname === '/api/repo/context') {
     const repoSlug = parsed.query.repo || 'zaf';
-    const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+    const repoRoot = getSafeRepoRoot(repoSlug);
+    if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
     try {
       const ctx = generateRepoContext(repoRoot);
       send(res, 200, ctx);
@@ -2094,7 +2128,8 @@ ${payload.description || 'Task context and description.'}
     try {
       const payload = await readJsonBody(req);
       const repoSlug = payload.repo || 'zaf';
-      const repoRoot = path.resolve(REPOS_ROOT, repoSlug);
+      const repoRoot = getSafeRepoRoot(repoSlug);
+      if (!repoRoot) return send(res, 400, { error: 'Invalid repo path' });
       const ctx = generateRepoContext(repoRoot);
       const mdPath = path.join(repoRoot, 'CODEBASE.md');
       const content = `# Codebase Map — ${repoSlug}\n\nGenerated ${new Date().toISOString()}\n\n\`\`\`\n${ctx.contextBlock}\n\`\`\`\n`;

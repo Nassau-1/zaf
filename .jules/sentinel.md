@@ -6,3 +6,7 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+## 2025-02-27 - Path Traversal in Server Route Path Resolution
+**Vulnerability:** Path traversal (CWE-22) due to directly feeding user input into `path.resolve(REPOS_ROOT, userInput)`.
+**Learning:** `path.resolve` automatically evaluates `../` sequences, allowing an attacker to navigate outside the intended base directory.
+**Prevention:** Always validate that the final resolved path starts with the intended base directory using `startsWith()` (accounting for trailing slashes) after using `path.resolve()`, before performing file operations.
