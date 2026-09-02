@@ -1720,7 +1720,10 @@ ${payload.description || 'Task context and description.'}
     if (!versionCmd) return send(res, 400, { error: 'Unknown harness: ' + harnessId });
     let installed = false, version = '';
     try {
-      const out = execSync(versionCmd, { timeout: 8000, shell: true }).toString().trim();
+      const parts = versionCmd.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g).map(p => p.replace(/^["']|["']$/g, ''));
+      const bin = parts[0];
+      const args = parts.slice(1);
+      const out = execFileSync(bin, args, { timeout: 8000 }).toString().trim();
       installed = true;
       version = out.split(/\r?\n/)[0].slice(0, 80);
     } catch { installed = false; }
