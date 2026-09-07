@@ -25,6 +25,15 @@ const REPOS_ROOT = process.env.ZAF_REPOS_ROOT || path.resolve(DASHBOARD_DIR, '..
 const BACKUP_ROOT = process.env.ZAF_BACKUP_ROOT
   || path.resolve(DASHBOARD_DIR, '..', '..', '..', '02_Runtime', 'zaf-backups');
 
+
+// ─── Security Helpers ────────────────────────────────────────────────────────
+function getSafeRepoRoot(repoSlug) {
+  const resolved = path.resolve(REPOS_ROOT, repoSlug || 'zaf');
+  const rootStr = REPOS_ROOT.endsWith(path.sep) ? REPOS_ROOT : REPOS_ROOT + path.sep;
+  if (!resolved.startsWith(rootStr) && resolved !== REPOS_ROOT) return null;
+  return resolved;
+}
+
 const RETENTION = {
   daily:   7,
   weekly:  5,
@@ -149,7 +158,8 @@ function restoreLatest() {
   if (fs.existsSync(reposSnap)) {
     for (const slug of fs.readdirSync(reposSnap)) {
       const wipSrc = path.join(reposSnap, slug, 'WIP');
-      const repoLocal = path.join(REPOS_ROOT, slug);
+      const repoLocal = getSafeRepoRoot(slug);
+      if (!repoLocal) { report.restored.push(`skip ${slug} (invalid path)`); continue; }
       if (!fs.existsSync(repoLocal)) { report.restored.push(`skip ${slug} (repo not present locally)`); continue; }
       const wipDest = path.join(repoLocal, 'WIP');
       copyDirRecursive(wipSrc, wipDest);
