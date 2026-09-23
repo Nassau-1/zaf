@@ -65,17 +65,17 @@ const fleetProcessIds = new Set();             // processIds spawned via fleet d
 const REPO_CONTEXT_CACHE = new Map(); // repoRoot -> { ts, contextBlock, graph }
 const IGNORE_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__', 'target', 'coverage', '.turbo', 'out', '.cache']);
 
-function walkDir(dirPath, maxDepth, depth = 0) {
-  if (depth > maxDepth) return [];
-  let results = [];
+// Performance optimization: pass results array by reference to avoid O(N²) array allocations
+function walkDir(dirPath, maxDepth, depth = 0, results = []) {
+  if (depth > maxDepth) return results;
   let entries;
-  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return []; }
+  try { entries = fs.readdirSync(dirPath, { withFileTypes: true }); } catch { return results; }
   for (const e of entries) {
     if (e.name.startsWith('.') && e.name !== '.zaf-skills') continue;
     if (IGNORE_DIRS.has(e.name)) continue;
     const full = path.join(dirPath, e.name);
     if (e.isDirectory()) {
-      results = results.concat(walkDir(full, maxDepth, depth + 1));
+      walkDir(full, maxDepth, depth + 1, results);
     } else if (e.isFile()) {
       results.push(full);
     }
