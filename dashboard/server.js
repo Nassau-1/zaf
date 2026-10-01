@@ -1816,6 +1816,8 @@ ${payload.description || 'Task context and description.'}
       const payload = await readJsonBody(req);
       const { displayName, installCmd, authCmd, versionCmd, modelIds } = payload;
       if (!displayName || !versionCmd) return send(res, 400, { error: 'displayName and versionCmd required' });
+      // Security fix: Validate versionCmd to prevent command injection
+      if (!/^[a-zA-Z0-9\s\-_./@]+$/.test(versionCmd)) return send(res, 400, { error: 'Invalid characters in versionCmd' });
       const id = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       const conf = readConfig() || {};
       conf.customHarnesses = conf.customHarnesses || [];
