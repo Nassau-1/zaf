@@ -6,3 +6,8 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+
+## 2025-05-18 - Fix path traversal vulnerability in repo resolution
+**Vulnerability:** User-provided inputs were passed directly to `path.resolve(REPOS_ROOT, ...)` without proper validation, enabling arbitrary directory access via path traversal sequences like `%2e%2e`.
+**Learning:** Always decode and validate that resolved paths strictly reside within the intended base directory. Simple `.startsWith` checks are vulnerable without appending `path.sep` to the root.
+**Prevention:** Use a centralized wrapper function (e.g., `resolveRepoRoot`) that performs URI decoding, resolves the path, and verifies directory containment using strict prefix checks (including the directory separator) or exact equality. Handle decoding errors by returning a known safe/invalid path.
