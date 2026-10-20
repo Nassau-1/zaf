@@ -216,6 +216,10 @@
   cursor: pointer;
   padding: 0 4px;
   border-radius: 3px;
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
 }
 .console-tab .tab-close:hover { color: var(--status-blocked); background: rgba(239,68,68,0.1); }
 
