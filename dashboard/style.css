@@ -993,7 +993,8 @@ html, body {
 .btn:focus-visible,
 .console-btn:focus-visible,
 .detail-close:focus-visible,
-.nav-item:focus-visible {
+.nav-item:focus-visible,
+.zaf-btn:focus-visible {
   outline: 2px solid var(--indigo-500);
   outline-offset: 2px;
 }
