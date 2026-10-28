@@ -211,6 +211,10 @@
 .console-tab .tab-id { font-weight: 600; color: var(--indigo-400); }
 .console-tab .tab-meta { color: var(--text-muted); font-size: 10px; }
 .console-tab .tab-close {
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
   margin-left: 4px;
   color: var(--text-muted);
   cursor: pointer;
@@ -1028,6 +1032,7 @@
 }
 .zaf-launch-close:hover { color: var(--text-primary); }
 .zaf-launch-close:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
+.console-tab .tab-close:focus-visible { outline: 2px solid var(--indigo-500); outline-offset: -2px; }
 .zaf-launch-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
 .zaf-launch-footer {
   padding: 12px 20px; border-top: 1px solid var(--border-subtle);
