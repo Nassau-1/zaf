@@ -16,7 +16,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const url = require('url');
-const { execSync, execFileSync, spawn } = require('child_process');
+const { execSync, execFileSync, spawn, spawnSync } = require('child_process');
+const shellQuote = require('shell-quote');
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
@@ -1720,7 +1721,15 @@ ${payload.description || 'Task context and description.'}
     if (!versionCmd) return send(res, 400, { error: 'Unknown harness: ' + harnessId });
     let installed = false, version = '';
     try {
-      const out = execSync(versionCmd, { timeout: 8000, shell: true }).toString().trim();
+      // Security enhancement: Mitigate command injection in customHarnesses.versionCmd
+      // by safely parsing the command string and running without shell interpolation.
+      const parsedCmd = shellQuote.parse(versionCmd);
+      const cmdArgs = parsedCmd.map(p => typeof p === 'object' ? (p.op || p.pattern || '') : p).filter(Boolean);
+      if (cmdArgs.length === 0) throw new Error('Empty command');
+      const proc = spawnSync(cmdArgs[0], cmdArgs.slice(1), { timeout: 8000, shell: false, encoding: 'utf8' });
+      if (proc.error) throw proc.error;
+      if (proc.status !== 0) throw new Error('Command failed with status ' + proc.status);
+      const out = (proc.stdout || '').toString().trim();
       installed = true;
       version = out.split(/\r?\n/)[0].slice(0, 80);
     } catch { installed = false; }
