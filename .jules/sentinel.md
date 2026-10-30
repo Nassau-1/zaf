@@ -6,3 +6,8 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+
+## 2026-06-25 - Shell argument parsing for command injection mitigation
+**Vulnerability:** Command injection when using `execFileSync` by attempting to parse complex shell strings with tools like `shell-quote`, which produce un-executable AST objects instead of simple string arrays for shell operators.
+**Learning:** `execFileSync` does not invoke a shell, so it cannot handle shell pipelines (`|`), logical operators (`&&`), environment variable assignments (e.g. `ENV=1 cmd`), or native Windows scripts (`.cmd`/`.bat`) natively if passed as parsed arrays with special AST objects.
+**Prevention:** Avoid refactoring to `execFileSync` if the underlying command needs full shell evaluation, or if the source of the command string is a trusted internal registry rather than unsanitized user input.

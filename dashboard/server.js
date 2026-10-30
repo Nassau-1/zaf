@@ -2108,6 +2108,11 @@ ${payload.description || 'Task context and description.'}
   }
 
   // ── Static files ───────────────────────────────────────────────────────────
+  try {
+    pathname = decodeURIComponent(pathname);
+  } catch (e) {
+    res.writeHead(400); res.end('Bad request'); return;
+  }
   let filePath = path.join(STATIC_DIR, pathname === '/' ? 'index.html' : pathname);
   if (!filePath.startsWith(STATIC_DIR + path.sep) && filePath !== STATIC_DIR) { res.writeHead(403); res.end('Forbidden'); return; }
   // Never serve secret/config stores or dotfiles from the static dir. `.secrets.json`
