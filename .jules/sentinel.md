@@ -6,3 +6,8 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+
+## 2026-11-01 - Poison Null Byte DoS in `decodeURIComponent` Path Handling
+**Vulnerability:** A Denial of Service (DoS) vulnerability where decoding URL-encoded paths (e.g., `%00`) in static file servers can result in literal null bytes (`\0`) being passed to Node.js `fs` or `path` functions.
+**Learning:** Node.js `fs` and `path` functions synchronously throw a `TypeError` (`ERR_INVALID_ARG_VALUE`) if they encounter a path string containing a null byte. If a server uses `decodeURIComponent` on user input without subsequently checking for null bytes, an attacker can send `/%00` to crash the entire Node.js process.
+**Prevention:** Whenever applying `decodeURIComponent` to user-supplied paths before filesystem operations, immediately check for and reject null bytes (e.g., `if (pathname.includes('\0')) { return res.writeHead(400); }`).
