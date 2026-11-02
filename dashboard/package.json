@@ -11,6 +11,7 @@
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^3.6.0",
     "gray-matter": "^4.0.3",
-    "marked": "^12.0.0"
+    "marked": "^12.0.0",
+    "shell-quote": "^1.12.0"
   }
 }
