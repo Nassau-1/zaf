@@ -18,6 +18,7 @@ const path = require('path');
 const url = require('url');
 const { execSync, execFileSync, spawn } = require('child_process');
 const chokidar = require('chokidar');
+const shellQuote = require('shell-quote');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -1720,7 +1721,9 @@ ${payload.description || 'Task context and description.'}
     if (!versionCmd) return send(res, 400, { error: 'Unknown harness: ' + harnessId });
     let installed = false, version = '';
     try {
-      const out = execSync(versionCmd, { timeout: 8000, shell: true }).toString().trim();
+      const parsedArgs = shellQuote.parse(versionCmd).filter(a => typeof a === 'string');
+      if (parsedArgs.length === 0) throw new Error('Empty command');
+      const out = execFileSync(parsedArgs[0], parsedArgs.slice(1), { timeout: 8000, shell: false }).toString().trim();
       installed = true;
       version = out.split(/\r?\n/)[0].slice(0, 80);
     } catch { installed = false; }
