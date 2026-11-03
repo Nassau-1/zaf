@@ -926,7 +926,7 @@ function activate(context) {
       vscode.window.showInformationMessage('ZAF: Refreshed');
     }),
 
-    vscode.commands.registerCommand('zaf.launchAgent', () => {
+    vscode.commands.registerCommand('zaf.launchAgent', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { vscode.window.showWarningMessage('ZAF: No active editor'); return; }
       const root = getWorkspaceRoot();
@@ -937,8 +937,15 @@ function activate(context) {
       if (!fs.existsSync(activeDir)) { vscode.window.showWarningMessage('ZAF: No active tickets dir'); return; }
       const matches = [];
       try {
-        for (const tf of fs.readdirSync(activeDir).filter(f => f.endsWith('.md'))) {
-          const content = fs.readFileSync(path.join(activeDir, tf), 'utf8');
+        const files = await fs.promises.readdir(activeDir);
+        const ticketFiles = files.filter(f => f.endsWith('.md'));
+        await Promise.all(ticketFiles.map(async tf => {
+          let content;
+          try {
+            content = await fs.promises.readFile(path.join(activeDir, tf), 'utf8');
+          } catch {
+            return;
+          }
           const refs = extractFileRefsFromTicket(content);
           if (refs.some(r => relPath.endsWith(r.filePath.replace(/\\/g, '/')))) {
             const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
@@ -946,7 +953,7 @@ function activate(context) {
             if (yamlMatch) { for (const l of yamlMatch[1].split('\n')) { if (l.startsWith('id:')) id = l.slice(3).trim(); } }
             matches.push(id);
           }
-        }
+        }));
       } catch {}
       if (!matches.length) {
         vscode.window.showWarningMessage('ZAF: No active ticket references this file');

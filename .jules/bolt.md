@@ -11,3 +11,7 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+
+## 2024-07-28 - VS Code Extension Main Thread Blocking via I/O
+**Learning:** In a VS Code extension, performing synchronous file operations (`fs.readdirSync`, `fs.readFileSync`) within a command handler that may process numerous files (like finding active tickets in `zaf.launchAgent`) blocks the Node.js event loop, freezing the editor UI for the user.
+**Action:** Consistently replace synchronous file system APIs with their asynchronous counterparts (`fs.promises`) inside VS Code command callbacks, and utilize `Promise.all()` to process multiple reads concurrently.
