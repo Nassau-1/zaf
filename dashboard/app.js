@@ -4945,10 +4945,10 @@ function renderOrg(container) {
           <button class="zaf-btn secondary" id="org-fit">Fit</button>
           <button class="zaf-btn secondary" id="org-save">Save Layout</button>
           <span style="flex:1"></span>
-          <button class="zaf-btn secondary" id="org-zoom-out" title="Zoom out">−</button>
+          <button class="zaf-btn secondary" id="org-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
           <span id="org-zoom-val" style="font-size:11px;color:var(--text-muted);min-width:46px;text-align:center;font-variant-numeric:tabular-nums">100%</span>
-          <button class="zaf-btn secondary" id="org-zoom-in" title="Zoom in">+</button>
-          <button class="zaf-btn secondary" id="org-zoom-reset" title="Reset to 100%">⟲</button>
+          <button class="zaf-btn secondary" id="org-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+          <button class="zaf-btn secondary" id="org-zoom-reset" title="Reset to 100%" aria-label="Reset zoom">⟲</button>
         </div>
         <svg class="zaf-org-canvas" id="org-canvas" viewBox="0 0 1600 1000" preserveAspectRatio="xMidYMid meet"></svg>
         <div class="zaf-org-help">
