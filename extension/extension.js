@@ -926,7 +926,7 @@ function activate(context) {
       vscode.window.showInformationMessage('ZAF: Refreshed');
     }),
 
-    vscode.commands.registerCommand('zaf.launchAgent', () => {
+    vscode.commands.registerCommand('zaf.launchAgent', async () => {
       const editor = vscode.window.activeTextEditor;
       if (!editor) { vscode.window.showWarningMessage('ZAF: No active editor'); return; }
       const root = getWorkspaceRoot();
@@ -934,19 +934,24 @@ function activate(context) {
       const relPath = path.relative(root, editor.document.uri.fsPath).replace(/\\/g, '/');
       // Look for tickets referencing this file
       const activeDir = path.join(root, 'WIP', 'tickets', 'ACTIVE');
-      if (!fs.existsSync(activeDir)) { vscode.window.showWarningMessage('ZAF: No active tickets dir'); return; }
+      try { await fs.promises.access(activeDir); } catch { vscode.window.showWarningMessage('ZAF: No active tickets dir'); return; }
       const matches = [];
       try {
-        for (const tf of fs.readdirSync(activeDir).filter(f => f.endsWith('.md'))) {
-          const content = fs.readFileSync(path.join(activeDir, tf), 'utf8');
+        const files = await fs.promises.readdir(activeDir);
+        const mdFiles = files.filter(f => f.endsWith('.md'));
+        // ⚡ Bolt: Use Promise.all with fs.promises to process ticket files concurrently without blocking UI
+        const results = await Promise.all(mdFiles.map(async tf => {
+          const content = await fs.promises.readFile(path.join(activeDir, tf), 'utf8');
           const refs = extractFileRefsFromTicket(content);
           if (refs.some(r => relPath.endsWith(r.filePath.replace(/\\/g, '/')))) {
             const yamlMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n/);
             let id = path.basename(tf, '.md');
             if (yamlMatch) { for (const l of yamlMatch[1].split('\n')) { if (l.startsWith('id:')) id = l.slice(3).trim(); } }
-            matches.push(id);
+            return id;
           }
-        }
+          return null;
+        }));
+        results.filter(r => r).forEach(id => matches.push(id));
       } catch {}
       if (!matches.length) {
         vscode.window.showWarningMessage('ZAF: No active ticket references this file');
