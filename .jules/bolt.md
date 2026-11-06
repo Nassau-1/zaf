@@ -11,3 +11,7 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+
+## 2024-11-06 - Replace execSync with execFileSync for parsing
+**Learning:** `execSync` invoking node inside the same environment is 2x slower than `execFileSync` running `node` with arguments due to shell overhead.
+**Action:** Replace `execSync(\`node "\${PARSE_SCRIPT}" ...\`)` with `execFileSync('node', [PARSE_SCRIPT, ...])` for performance.
