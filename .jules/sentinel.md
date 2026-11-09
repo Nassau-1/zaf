@@ -6,3 +6,8 @@
 ## 2026-06-24 - Enhance URI decoding and boundary validation
 **Learning:** Using `startsWith` for boundary validation without a path separator can allow prefix matching on longer paths. Also, not decoding URLs properly can incorrectly pass certain logic checks.
 **Prevention:** Use `decodeURIComponent` in a try-catch block and always append `path.sep` to directory paths when using `startsWith`.
+
+## 2024-06-13 - Command Injection in custom harness via execSync
+**Vulnerability:** Arbitrary command injection via unsanitized `versionCmd` from custom harnesses using `execSync(..., { shell: true })`.
+**Learning:** Configurable system commands like custom CLI version checks can be weaponized if directly executed inside a shell.
+**Prevention:** Use `shell-quote` to safely parse the arguments, filter out non-string AST objects, and invoke `execFileSync` with `shell: false`.
