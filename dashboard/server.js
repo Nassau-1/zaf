@@ -19,6 +19,7 @@ const url = require('url');
 const { execSync, execFileSync, spawn } = require('child_process');
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
+const shellQuote = require('shell-quote');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -1720,7 +1721,10 @@ ${payload.description || 'Task context and description.'}
     if (!versionCmd) return send(res, 400, { error: 'Unknown harness: ' + harnessId });
     let installed = false, version = '';
     try {
-      const out = execSync(versionCmd, { timeout: 8000, shell: true }).toString().trim();
+      // 🛡️ Sentinel: Fix command injection by using shell-quote and execFileSync without shell: true
+      const parsedCmd = shellQuote.parse(versionCmd).filter(a => typeof a === 'string');
+      if (parsedCmd.length === 0) throw new Error('Invalid versionCmd');
+      const out = execFileSync(parsedCmd[0], parsedCmd.slice(1), { timeout: 8000, shell: false }).toString().trim();
       installed = true;
       version = out.split(/\r?\n/)[0].slice(0, 80);
     } catch { installed = false; }
