@@ -19,6 +19,7 @@ const url = require('url');
 const { execSync, execFileSync, spawn } = require('child_process');
 const chokidar = require('chokidar');
 const nodePty = require('@homebridge/node-pty-prebuilt-multiarch');
+const { parse: parseShellQuote } = require('shell-quote');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -1720,7 +1721,11 @@ ${payload.description || 'Task context and description.'}
     if (!versionCmd) return send(res, 400, { error: 'Unknown harness: ' + harnessId });
     let installed = false, version = '';
     try {
-      const out = execSync(versionCmd, { timeout: 8000, shell: true }).toString().trim();
+      // 🛡️ Sentinel: Fix command injection by parsing shell arguments safely
+      const parsedCmd = parseShellQuote(versionCmd).filter(a => typeof a === 'string');
+      const bin = parsedCmd[0];
+      const cmdArgs = parsedCmd.slice(1);
+      const out = execFileSync(bin, cmdArgs, { timeout: 8000, shell: false }).toString().trim();
       installed = true;
       version = out.split(/\r?\n/)[0].slice(0, 80);
     } catch { installed = false; }
