@@ -1140,15 +1140,21 @@ const server = http.createServer(async (req, res) => {
       const sigCounts = new Map();
       const sigFirstIdx = new Map();
 
+      // ⚡ Bolt: Extract event mapping out of the loop and optimize inner loop string building to improve sub-sequence search performance
+      const evMapped = events.map(e => e.kind + ':' + e.content.slice(0, 30));
       // Pass 1: O(N) frequency counting
       for (let i = 0; i <= events.length - len; i++) {
-        let sig = '';
-        for (let k = 0; k < len; k++) {
-          const e = events[i + k];
-          sig += (k > 0 ? '|' : '') + e.kind + ':' + e.content.slice(0, 30);
+        let sig = evMapped[i];
+        for (let k = 1; k < len; k++) {
+          sig += '|' + evMapped[i + k];
         }
-        sigCounts.set(sig, (sigCounts.get(sig) || 0) + 1);
-        if (!sigFirstIdx.has(sig)) sigFirstIdx.set(sig, i);
+        const c = sigCounts.get(sig);
+        if (c === undefined) {
+          sigCounts.set(sig, 1);
+          sigFirstIdx.set(sig, i);
+        } else {
+          sigCounts.set(sig, c + 1);
+        }
       }
 
       // Pass 2: Process candidates

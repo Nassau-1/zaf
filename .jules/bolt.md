@@ -11,3 +11,6 @@
 ## 2024-06-02 - Async I/O for HTTP endpoints
 **Learning:** Using sequential synchronous I/O operations (like `fs.readdirSync` combined with `fs.readFileSync` inside `.map()`) in HTTP request handlers blocks the Node.js event loop, creating a bottleneck for concurrent requests.
 **Action:** Replace synchronous file system operations with `fs.promises` and utilize `Promise.all()` to process multiple files concurrently in server endpoints, like `/api/repo/skills`.
+## 2024-11-12 - [String Concatenation in tight loop]
+**Learning:** Found string concatenation happening repeatedly inside an O(N*len) loop for frequency counting of event sub-sequences (in `dashboard/server.js`). Building string signatures `sig += ...` with slicing inside the inner loop is extremely inefficient. We can pre-calculate the element signatures and then join them.
+**Action:** Replace string concatenation in tight loops with array maps and joins, or map string properties once beforehand.
